@@ -8,7 +8,7 @@ from pydantic import (
 )
 
 from ._validators import (
-    validate_date_column,
+    validate_temporal_columns,
     validate_exact_columns,
     validate_numeric_columns,
 )
@@ -24,8 +24,8 @@ class DeterministicData(BaseModel):
 
     @model_validator(mode="after")
     def _validate_schema(self) -> "DeterministicData":
-        validate_exact_columns(self.data, ["date", "value"])
-        validate_date_column(self.data)
+        validate_exact_columns(self.data, ["issue_datetime", "datetime", "value"])
+        validate_temporal_columns(self.data)
         validate_numeric_columns(self.data, ["value"])
         return self
 
@@ -52,9 +52,11 @@ class QuantileData(BaseModel):
 
     @model_validator(mode="after")
     def _validate_schema(self) -> "QuantileData":
-        expected_cols = ["date"] + [str(q) for q in self.quantile_levels]
+        expected_cols = ["issue_datetime", "datetime"] + [
+            str(q) for q in self.quantile_levels
+        ]
         validate_exact_columns(self.data, expected_cols)
-        validate_date_column(self.data)
+        validate_temporal_columns(self.data)
         validate_numeric_columns(self.data, [str(q) for q in self.quantile_levels])
         return self
 
@@ -74,9 +76,11 @@ class TrajectoryData(BaseModel):
 
     @model_validator(mode="after")
     def _validate_schema(self) -> "TrajectoryData":
-        expected_cols = ["date"] + [str(i) for i in range(1, self.num_samples + 1)]
+        expected_cols = ["issue_datetime", "datetime"] + [
+            str(i) for i in range(1, self.num_samples + 1)
+        ]
         validate_exact_columns(self.data, expected_cols)
-        validate_date_column(self.data)
+        validate_temporal_columns(self.data)
         validate_numeric_columns(
             self.data, [str(i) for i in range(1, self.num_samples + 1)]
         )
@@ -90,8 +94,10 @@ class EpistemicUncertaintyData(BaseModel):
 
     @model_validator(mode="after")
     def _validate_schema(self) -> "EpistemicUncertaintyData":
-        validate_exact_columns(self.data, ["date", "std", "range"])
-        validate_date_column(self.data)
+        validate_exact_columns(
+            self.data, ["issue_datetime", "datetime", "std", "range"]
+        )
+        validate_temporal_columns(self.data)
         validate_numeric_columns(self.data, ["std", "range"])
         return self
 

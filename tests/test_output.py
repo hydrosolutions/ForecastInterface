@@ -1,5 +1,5 @@
 import datetime
-from datetime import date, timedelta
+from datetime import timedelta
 
 import polars as pl
 import pytest
@@ -18,6 +18,10 @@ from forecast_interface.output import (
     VariableStatus,
 )
 
+_ISSUE_DT = datetime.datetime(2024, 1, 1, 6, 0)
+_DT1 = datetime.datetime(2024, 1, 1)
+_DT2 = datetime.datetime(2024, 1, 2)
+
 
 def _make_metadata(**overrides: object) -> VariableMetadata:
     defaults: dict[str, object] = {
@@ -34,7 +38,11 @@ def _make_metadata(**overrides: object) -> VariableMetadata:
 
 def _make_det_df() -> pl.DataFrame:
     return pl.DataFrame(
-        {"date": [date(2024, 1, 1), date(2024, 1, 2)], "value": [1.0, 2.0]}
+        {
+            "issue_datetime": [_ISSUE_DT, _ISSUE_DT],
+            "datetime": [_DT1, _DT2],
+            "value": [1.0, 2.0],
+        }
     )
 
 
@@ -120,7 +128,8 @@ class TestVariableMetadata:
 def _make_epistemic_df() -> pl.DataFrame:
     return pl.DataFrame(
         {
-            "date": [date(2024, 1, 1), date(2024, 1, 2)],
+            "issue_datetime": [_ISSUE_DT, _ISSUE_DT],
+            "datetime": [_DT1, _DT2],
             "std": [0.5, 0.8],
             "range": [1.0, 1.6],
         }
@@ -139,88 +148,153 @@ class TestForecastFlag:
 class TestEpistemicUncertaintyData:
     def test_valid_construction(self) -> None:
         eu = EpistemicUncertaintyData(data=_make_epistemic_df())
-        assert eu.data.shape == (2, 3)
-        assert eu.data.columns == ["date", "std", "range"]
+        assert eu.data.shape == (2, 4)
+        assert eu.data.columns == ["issue_datetime", "datetime", "std", "range"]
 
     def test_missing_std_column_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "range": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "range": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             EpistemicUncertaintyData(data=df)
 
     def test_missing_range_column_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "std": [0.5]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "std": [0.5],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             EpistemicUncertaintyData(data=df)
 
     def test_extra_column_rejected(self) -> None:
         df = pl.DataFrame(
-            {"date": [date(2024, 1, 1)], "std": [0.5], "range": [1.0], "extra": [2.0]}
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "std": [0.5],
+                "range": [1.0],
+                "extra": [2.0],
+            }
         )
         with pytest.raises(ValueError, match="Column mismatch"):
             EpistemicUncertaintyData(data=df)
 
     def test_non_numeric_std_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "std": ["abc"], "range": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "std": ["abc"],
+                "range": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="must be numeric"):
             EpistemicUncertaintyData(data=df)
 
-    def test_non_temporal_date_rejected(self) -> None:
-        df = pl.DataFrame({"date": ["2024-01-01"], "std": [0.5], "range": [1.0]})
-        with pytest.raises(ValueError, match="must be Date or Datetime"):
-            EpistemicUncertaintyData(data=df)
-
-    def test_datetime_date_column_accepted(self) -> None:
+    def test_non_temporal_datetime_rejected(self) -> None:
         df = pl.DataFrame(
             {
-                "date": [datetime.datetime(2024, 1, 1)],
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": ["2024-01-01"],
                 "std": [0.5],
                 "range": [1.0],
             }
         )
-        eu = EpistemicUncertaintyData(data=df)
-        assert eu.data.shape == (1, 3)
+        with pytest.raises(ValueError, match="must be Datetime"):
+            EpistemicUncertaintyData(data=df)
+
+    def test_non_temporal_issue_datetime_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": ["2024-01-01"],
+                "datetime": [_DT1],
+                "std": [0.5],
+                "range": [1.0],
+            }
+        )
+        with pytest.raises(ValueError, match="must be Datetime"):
+            EpistemicUncertaintyData(data=df)
 
 
 class TestDeterministicData:
     def test_valid_construction(self) -> None:
         det = _make_deterministic()
-        assert det.data.shape == (2, 2)
-        assert det.data.columns == ["date", "value"]
+        assert det.data.shape == (2, 3)
+        assert det.data.columns == ["issue_datetime", "datetime", "value"]
 
     def test_missing_value_column_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "other": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "other": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             DeterministicData(data=df)
 
-    def test_missing_date_column_rejected(self) -> None:
-        df = pl.DataFrame({"timestamp": [date(2024, 1, 1)], "value": [1.0]})
+    def test_missing_datetime_column_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "timestamp": [_DT1],
+                "value": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             DeterministicData(data=df)
 
     def test_extra_column_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "value": [1.0], "extra": [2.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "value": [1.0],
+                "extra": [2.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             DeterministicData(data=df)
 
     def test_non_numeric_value_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "value": ["abc"]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "value": ["abc"],
+            }
+        )
         with pytest.raises(ValueError, match="must be numeric"):
             DeterministicData(data=df)
 
-    def test_non_temporal_date_rejected(self) -> None:
-        df = pl.DataFrame({"date": ["2024-01-01"], "value": [1.0]})
-        with pytest.raises(ValueError, match="must be Date or Datetime"):
-            DeterministicData(data=df)
-
-    def test_datetime_date_column_accepted(self) -> None:
+    def test_non_temporal_datetime_rejected(self) -> None:
         df = pl.DataFrame(
             {
-                "date": [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)],
-                "value": [1.0, 2.0],
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": ["2024-01-01"],
+                "value": [1.0],
             }
         )
-        det = DeterministicData(data=df)
-        assert det.data.shape == (2, 2)
+        with pytest.raises(ValueError, match="must be Datetime"):
+            DeterministicData(data=df)
+
+    def test_non_temporal_issue_datetime_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": ["2024-01-01"],
+                "datetime": [_DT1],
+                "value": [1.0],
+            }
+        )
+        with pytest.raises(ValueError, match="must be Datetime"):
+            DeterministicData(data=df)
 
 
 class TestQuantileData:
@@ -228,7 +302,8 @@ class TestQuantileData:
         levels = [0.1, 0.5, 0.9]
         df = pl.DataFrame(
             {
-                "date": [date(2024, 1, 1)],
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
                 "0.1": [1.0],
                 "0.5": [2.0],
                 "0.9": [3.0],
@@ -236,40 +311,83 @@ class TestQuantileData:
         )
         qd = QuantileData(quantile_levels=levels, data=df)
         assert qd.quantile_levels == levels
-        assert qd.data.shape == (1, 4)
+        assert qd.data.shape == (1, 5)
 
     def test_empty_levels_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+            }
+        )
         with pytest.raises(ValueError, match="must not be empty"):
             QuantileData(quantile_levels=[], data=df)
 
     def test_level_zero_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "0.0": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.0": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
             QuantileData(quantile_levels=[0.0], data=df)
 
     def test_level_one_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "1.0": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "1.0": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
             QuantileData(quantile_levels=[1.0], data=df)
 
     def test_unsorted_levels_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "0.9": [1.0], "0.1": [2.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.9": [1.0],
+                "0.1": [2.0],
+            }
+        )
         with pytest.raises(ValueError, match="must be sorted ascending"):
             QuantileData(quantile_levels=[0.9, 0.1], data=df)
 
     def test_duplicate_levels_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "0.5": [1.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.5": [1.0],
+            }
+        )
         with pytest.raises(ValueError, match="must not contain duplicates"):
             QuantileData(quantile_levels=[0.5, 0.5], data=df)
 
     def test_column_mismatch_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "0.1": [1.0], "0.9": [3.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.1": [1.0],
+                "0.9": [3.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             QuantileData(quantile_levels=[0.1, 0.5, 0.9], data=df)
 
     def test_non_numeric_quantile_column_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "0.5": ["abc"]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.5": ["abc"],
+            }
+        )
         with pytest.raises(ValueError, match="must be numeric"):
             QuantileData(quantile_levels=[0.5], data=df)
 
@@ -278,7 +396,8 @@ class TestTrajectoryData:
     def test_valid_construction(self) -> None:
         df = pl.DataFrame(
             {
-                "date": [date(2024, 1, 1)],
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
                 "1": [10.0],
                 "2": [20.0],
                 "3": [30.0],
@@ -286,25 +405,49 @@ class TestTrajectoryData:
         )
         td = TrajectoryData(num_samples=3, data=df)
         assert td.num_samples == 3
-        assert td.data.shape == (1, 4)
+        assert td.data.shape == (1, 5)
 
     def test_zero_samples_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+            }
+        )
         with pytest.raises(ValueError, match="num_samples must be positive"):
             TrajectoryData(num_samples=0, data=df)
 
     def test_negative_samples_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+            }
+        )
         with pytest.raises(ValueError, match="num_samples must be positive"):
             TrajectoryData(num_samples=-1, data=df)
 
     def test_column_count_mismatch_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "1": [10.0], "2": [20.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "1": [10.0],
+                "2": [20.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             TrajectoryData(num_samples=3, data=df)
 
     def test_wrong_column_names_rejected(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "a": [10.0], "b": [20.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "a": [10.0],
+                "b": [20.0],
+            }
+        )
         with pytest.raises(ValueError, match="Column mismatch"):
             TrajectoryData(num_samples=2, data=df)
 
@@ -323,7 +466,13 @@ class TestVariableOutput:
 
     def test_valid_quantiles_only(self) -> None:
         df = pl.DataFrame(
-            {"date": [date(2024, 1, 1)], "0.1": [1.0], "0.5": [2.0], "0.9": [3.0]}
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.1": [1.0],
+                "0.5": [2.0],
+                "0.9": [3.0],
+            }
         )
         vo = VariableOutput(
             metadata=_make_metadata(),
@@ -334,7 +483,14 @@ class TestVariableOutput:
         assert vo.deterministic is None
 
     def test_valid_trajectories_only(self) -> None:
-        df = pl.DataFrame({"date": [date(2024, 1, 1)], "1": [10.0], "2": [20.0]})
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "1": [10.0],
+                "2": [20.0],
+            }
+        )
         vo = VariableOutput(
             metadata=_make_metadata(),
             trajectories=TrajectoryData(num_samples=2, data=df),
@@ -347,11 +503,23 @@ class TestVariableOutput:
         det = _make_deterministic()
         quant = QuantileData(
             quantile_levels=[0.5],
-            data=pl.DataFrame({"date": [date(2024, 1, 1)], "0.5": [1.0]}),
+            data=pl.DataFrame(
+                {
+                    "issue_datetime": [_ISSUE_DT],
+                    "datetime": [_DT1],
+                    "0.5": [1.0],
+                }
+            ),
         )
         traj = TrajectoryData(
             num_samples=1,
-            data=pl.DataFrame({"date": [date(2024, 1, 1)], "1": [1.0]}),
+            data=pl.DataFrame(
+                {
+                    "issue_datetime": [_ISSUE_DT],
+                    "datetime": [_DT1],
+                    "1": [1.0],
+                }
+            ),
         )
         vo = VariableOutput(
             metadata=_make_metadata(),
@@ -463,7 +631,7 @@ class TestModelOutput:
     def test_valid_construction(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={"discharge": self._make_variable_output()},
         )
         assert mo.model_name == "test_model"
@@ -472,7 +640,7 @@ class TestModelOutput:
     def test_multiple_variables(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
                 "discharge": self._make_variable_output(),
                 "temperature": self._make_variable_output(),
@@ -483,7 +651,7 @@ class TestModelOutput:
     def test_success_all_success(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
                 "a": self._make_variable_output(VariableStatus.SUCCESS),
                 "b": self._make_variable_output(VariableStatus.SUCCESS),
@@ -494,7 +662,7 @@ class TestModelOutput:
     def test_success_false_when_any_failure(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
                 "a": self._make_variable_output(VariableStatus.SUCCESS),
                 "b": self._make_variable_output(VariableStatus.FAILURE),
@@ -505,7 +673,7 @@ class TestModelOutput:
     def test_success_false_when_any_partial(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
                 "a": self._make_variable_output(VariableStatus.SUCCESS),
                 "b": self._make_variable_output(VariableStatus.PARTIAL),
@@ -516,7 +684,7 @@ class TestModelOutput:
     def test_success_true_empty_variables(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            forecast_issue_date=datetime.datetime(2024, 1, 1),
+            issue_datetime=datetime.datetime(2024, 1, 1),
             variables={},
         )
         assert mo.success is True

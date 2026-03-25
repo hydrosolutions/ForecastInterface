@@ -1,7 +1,7 @@
 import polars as pl
 
 
-TEMPORAL_DTYPES = (pl.Date, pl.Datetime)
+DATETIME_DTYPE = pl.Datetime
 NUMERIC_DTYPES = (
     pl.Float32,
     pl.Float64,
@@ -15,14 +15,15 @@ NUMERIC_DTYPES = (
     pl.UInt64,
 )
 
+TEMPORAL_COLUMNS = ("issue_datetime", "datetime")
 
-def validate_date_column(df: pl.DataFrame) -> None:
-    if "date" not in df.columns:
-        raise ValueError("DataFrame must contain a 'date' column")
-    if not isinstance(df.schema["date"], TEMPORAL_DTYPES):
-        raise ValueError(
-            f"'date' column must be Date or Datetime, got {df.schema['date']}"
-        )
+
+def validate_temporal_columns(df: pl.DataFrame) -> None:
+    for col in TEMPORAL_COLUMNS:
+        if col not in df.columns:
+            raise ValueError(f"DataFrame must contain a '{col}' column")
+        if not isinstance(df.schema[col], DATETIME_DTYPE):
+            raise ValueError(f"'{col}' column must be Datetime, got {df.schema[col]}")
 
 
 def validate_numeric_columns(df: pl.DataFrame, columns: list[str]) -> None:

@@ -10,7 +10,7 @@ class ModelOutput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str
-    forecast_issue_date: datetime
+    issue_datetime: datetime
     variables: dict[str, VariableOutput]
 
     @computed_field  # type: ignore[prop-decorator]
