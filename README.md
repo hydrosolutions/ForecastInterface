@@ -6,6 +6,11 @@ Importable protocol and schema package for forecasting models. Defines validated
 uv add forecastinterface
 ```
 
+## Documentation
+
+- [Model Interface Specification](docs/model_interface.md)
+- [Input Requirement Specification](docs/input_requirement.md)
+
 ## ModelOutput
 
 Top-level container holding forecast results for one or more variables. Each variable can independently carry deterministic forecasts, quantile forecasts, trajectory ensembles, or any combination.
@@ -15,7 +20,7 @@ Top-level container holding forecast results for one or more variables. Each var
 ```
 ModelOutput
     model_name: str
-    forecast_issue_date: datetime
+    issue_datetime: datetime
     success: bool                          # derived — True when all variables succeeded
     variables: dict[str, VariableOutput]   # keyed by variable name
 
@@ -24,82 +29,83 @@ VariableOutput
     deterministic: DeterministicData | None
     quantiles: QuantileData | None
     trajectories: TrajectoryData | None
+    epistemic_uncertainty: EpistemicUncertaintyData | None
     status: VariableStatus                 # SUCCESS | FAILURE | PARTIAL
+    flags: frozenset[ForecastFlag]
 
 VariableMetadata
     name: str
     unit: Unit                             # e.g. Unit.M3_PER_S → "m³/s"
-    resolution: Resolution                 # e.g. Resolution.DAILY
+    resolution: TemporalResolution                 # e.g. TemporalResolution.DAILY
     timedelta: timedelta                   # time step between forecast points
     forecast_horizon: int                  # number of forecast steps (> 0)
     offset: int                            # offset in steps (>= 0)
 
 DeterministicData
-    data: pl.DataFrame                     # columns: ["date", "value"]
+    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "value"]
 
 QuantileData
     quantile_levels: list[float]           # e.g. [0.1, 0.5, 0.9] — sorted, in (0, 1)
-    data: pl.DataFrame                     # columns: ["date", "0.1", "0.5", "0.9"]
+    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "0.1", "0.5", "0.9"]
 
 TrajectoryData
     num_samples: int                       # number of ensemble members (> 0)
-    data: pl.DataFrame                     # columns: ["date", "1", "2", ..., "N"]
+    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "1", "2", ..., "N"]
+
+EpistemicUncertaintyData
+    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "std", "range"]
 ```
 
 ### DataFrame Schemas
 
 All DataFrames are validated on construction:
 
-| Container | `date` column | Value columns |
-|---|---|---|
-| `DeterministicData` | `Date` or `Datetime` | `value` (numeric) |
-| `QuantileData` | `Date` or `Datetime` | One per level, named as float strings: `"0.1"`, `"0.5"`, ... |
-| `TrajectoryData` | `Date` or `Datetime` | One per sample, named `"1"`, `"2"`, ..., `"N"` |
+| Container | `issue_datetime` column | `datetime` column | Value columns |
+|---|---|---|---|
+| `DeterministicData` | `Datetime` | `Datetime` | `value` (numeric) |
+| `QuantileData` | `Datetime` | `Datetime` | One per level, named as float strings: `"0.1"`, `"0.5"`, ... |
+| `TrajectoryData` | `Datetime` | `Datetime` | One per sample, named `"1"`, `"2"`, ..., `"N"` |
+| `EpistemicUncertaintyData` | `Datetime` | `Datetime` | `std` (numeric), `range` (numeric) |
 
 ### Enums
 
-**Unit** — `M3_PER_S`, `MM_PER_DAY`, `MM_PER_S`, `MM`, `CM`, `M`, `DEG_C`, `UNITLESS`
+**Unit** -- `M3_PER_S`, `MM_PER_DAY`, `MM_PER_S`, `MM`, `CM`, `M`, `DEG_C`, `UNITLESS`
 
-**Resolution** — `SUB_HOURLY`, `HOURLY`, `SUB_DAILY`, `DAILY`, `WEEKLY`, `MONTHLY`, `SEASONAL`, `ANNUAL`
+**TemporalResolution** -- `SUB_HOURLY`, `HOURLY`, `SUB_DAILY`, `DAILY`, `WEEKLY`, `MONTHLY`, `SEASONAL`, `ANNUAL`
 
-**VariableStatus** — `SUCCESS`, `FAILURE`, `PARTIAL`
+**VariableStatus** -- `SUCCESS`, `FAILURE`, `PARTIAL`
+
+**ForecastFlag** -- `HIGH_EPISTEMIC_UNCERTAINTY`, `DATA_AVAILABILITY`
 
 ### Usage
 
 ```python
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import polars as pl
 from forecast_interface import (
     ModelOutput, VariableOutput, VariableMetadata,
-    DeterministicData, QuantileData, Unit, Resolution, VariableStatus,
+    DeterministicData, QuantileData, Unit, TemporalResolution, VariableStatus,
 )
 
+issue_dt = datetime(2024, 6, 1, 6, 0)
 output = ModelOutput(
     model_name="MyModel",
-    forecast_issue_date=datetime(2024, 6, 1),
+    issue_datetime=issue_dt,
     variables={
         "streamflow": VariableOutput(
             metadata=VariableMetadata(
                 name="streamflow",
                 unit=Unit.M3_PER_S,
-                resolution=Resolution.DAILY,
+                resolution=TemporalResolution.DAILY,
                 timedelta=timedelta(days=1),
                 forecast_horizon=10,
                 offset=0,
             ),
             deterministic=DeterministicData(
                 data=pl.DataFrame({
-                    "date": [date(2024, 6, 1), date(2024, 6, 2)],
+                    "issue_datetime": [issue_dt, issue_dt],
+                    "datetime": [datetime(2024, 6, 1), datetime(2024, 6, 2)],
                     "value": [42.0, 43.5],
-                }),
-            ),
-            quantiles=QuantileData(
-                quantile_levels=[0.1, 0.5, 0.9],
-                data=pl.DataFrame({
-                    "date": [date(2024, 6, 1), date(2024, 6, 2)],
-                    "0.1": [38.0, 39.0],
-                    "0.5": [42.0, 43.5],
-                    "0.9": [46.0, 48.0],
                 }),
             ),
             status=VariableStatus.SUCCESS,
@@ -108,9 +114,35 @@ output = ModelOutput(
 )
 
 assert output.success is True
-assert output.variables["streamflow"].deterministic is not None
 ```
 
-## ModelInput
+## InputRequirement
 
-Not yet implemented.
+Declares what data a forecasting model needs. The preprocessing pipeline reads this spec and provides exactly the required inputs.
+
+See [Input Requirement Specification](docs/input_requirement.md) for full documentation.
+
+### Structure
+
+```
+InputRequirement
+    dynamic: dict[TemporalResolution, SpatialInputSpec]
+    static: set[str]
+
+SpatialInputSpec
+    distributed: DynamicInputSpec | None
+    lumped: DynamicInputSpec | None
+
+DynamicInputSpec
+    past_known: dict[str, dict[str, PastKnownVariable]]
+    future_known: dict[str, dict[str, FutureKnownVariable]]
+
+PastKnownVariable
+    lookback: int
+    max_nan: int
+
+FutureKnownVariable
+    future_steps: int
+    max_nan: int
+    ensemble_mode: EnsembleMode    # SINGLE or ENSEMBLE
+```

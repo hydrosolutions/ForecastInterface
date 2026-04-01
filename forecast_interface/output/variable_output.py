@@ -120,10 +120,10 @@ class VariableOutput(BaseModel):
 
     @model_validator(mode="after")
     def _validate_data_present(self) -> "VariableOutput":
-        if self.status == VariableStatus.SUCCESS:
+        if self.status in (VariableStatus.SUCCESS, VariableStatus.PARTIAL):
             if not any([self.deterministic, self.quantiles, self.trajectories]):
                 raise ValueError(
                     "at least one of deterministic, quantiles, or trajectories "
-                    "must be present when status is SUCCESS"
+                    "must be present when status is SUCCESS or PARTIAL"
                 )
         return self

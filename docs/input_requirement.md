@@ -63,13 +63,13 @@ Each variable declares the following properties:
 | `lookback`     | `int`  | past_known    | Number of past time steps required (must be > 0)             |
 | `future_steps` | `int`  | future_known  | Number of future time steps required (must be > 0)           |
 | `max_nan`      | `int`  | both          | Maximum allowed NaN values in the time series (must be >= 0) |
-| `ensemble`     | `bool` | future_known  | Whether ensemble traces are needed (default: `false`)        |
+| `ensemble_mode`| `EnsembleMode` | future_known  | Whether ensemble or single traces are needed (`single` or `ensemble`, default: `single`) |
 
 ---
 
 ## Static Inputs
 
-A flat list of variable names (`list[str]`).
+An unordered set of variable names (`set[str]`). Duplicates are ignored.
 
 Example: `["catchment_area", "mean_slope", "forest_fraction", "clay_fraction"]`
 
@@ -94,16 +94,16 @@ dynamic:
           precipitation:
             future_steps: 10
             max_nan: 0
-            ensemble: true
+            ensemble_mode: ensemble
           temperature:
             future_steps: 10
             max_nan: 0
-            ensemble: false
+            ensemble_mode: single
         ECMWF:
           precipitation:
             future_steps: 15
             max_nan: 0
-            ensemble: true
+            ensemble_mode: ensemble
     distributed:
       past_known:
         ERA5:
@@ -125,7 +125,7 @@ dynamic:
           precipitation:
             future_steps: 48
             max_nan: 0
-            ensemble: false
+            ensemble_mode: single
 
 static:
   - catchment_area

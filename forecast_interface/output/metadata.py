@@ -2,17 +2,24 @@ import datetime
 
 from pydantic import BaseModel, field_validator
 
-from .units import Unit
-from .resolutions import Resolution
+from forecast_interface.common.units import Unit
+from forecast_interface.common.resolutions import TemporalResolution
 
 
 class VariableMetadata(BaseModel):
     name: str
     unit: Unit
-    resolution: Resolution
+    resolution: TemporalResolution
     timedelta: datetime.timedelta
     forecast_horizon: int
     offset: int
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("name must be a non-empty string")
+        return v
 
     @field_validator("forecast_horizon")
     @classmethod
