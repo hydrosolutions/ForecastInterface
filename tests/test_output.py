@@ -10,7 +10,7 @@ from forecast_interface.output import (
     ForecastFlag,
     ModelOutput,
     QuantileData,
-    Resolution,
+    TemporalResolution,
     TrajectoryData,
     Unit,
     VariableMetadata,
@@ -27,7 +27,7 @@ def _make_metadata(**overrides: object) -> VariableMetadata:
     defaults: dict[str, object] = {
         "name": "discharge",
         "unit": Unit.M3_PER_S,
-        "resolution": Resolution.DAILY,
+        "resolution": TemporalResolution.DAILY,
         "timedelta": timedelta(days=1),
         "forecast_horizon": 10,
         "offset": 0,
@@ -65,19 +65,19 @@ class TestUnit:
         assert len(Unit) == 8
 
 
-class TestResolution:
+class TestTemporalResolution:
     def test_members_exist(self) -> None:
-        assert Resolution.SUB_HOURLY.value == "sub_hourly"
-        assert Resolution.HOURLY.value == "hourly"
-        assert Resolution.SUB_DAILY.value == "sub_daily"
-        assert Resolution.DAILY.value == "daily"
-        assert Resolution.WEEKLY.value == "weekly"
-        assert Resolution.MONTHLY.value == "monthly"
-        assert Resolution.SEASONAL.value == "seasonal"
-        assert Resolution.ANNUAL.value == "annual"
+        assert TemporalResolution.SUB_HOURLY.value == "sub_hourly"
+        assert TemporalResolution.HOURLY.value == "hourly"
+        assert TemporalResolution.SUB_DAILY.value == "sub_daily"
+        assert TemporalResolution.DAILY.value == "daily"
+        assert TemporalResolution.WEEKLY.value == "weekly"
+        assert TemporalResolution.MONTHLY.value == "monthly"
+        assert TemporalResolution.SEASONAL.value == "seasonal"
+        assert TemporalResolution.ANNUAL.value == "annual"
 
     def test_member_count(self) -> None:
-        assert len(Resolution) == 8
+        assert len(TemporalResolution) == 8
 
 
 class TestVariableStatus:
@@ -95,10 +95,18 @@ class TestVariableMetadata:
         meta = _make_metadata()
         assert meta.name == "discharge"
         assert meta.unit == Unit.M3_PER_S
-        assert meta.resolution == Resolution.DAILY
+        assert meta.resolution == TemporalResolution.DAILY
         assert meta.timedelta == timedelta(days=1)
         assert meta.forecast_horizon == 10
         assert meta.offset == 0
+
+    def test_empty_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="name must be a non-empty string"):
+            _make_metadata(name="")
+
+    def test_whitespace_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="name must be a non-empty string"):
+            _make_metadata(name="   ")
 
     def test_zero_forecast_horizon_rejected(self) -> None:
         with pytest.raises(ValueError, match="forecast_horizon must be positive"):
@@ -546,9 +554,17 @@ class TestVariableOutput:
         )
         assert vo.status == VariableStatus.FAILURE
 
-    def test_partial_without_data_accepted(self) -> None:
+    def test_partial_without_data_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one of"):
+            VariableOutput(
+                metadata=_make_metadata(),
+                status=VariableStatus.PARTIAL,
+            )
+
+    def test_partial_with_data_accepted(self) -> None:
         vo = VariableOutput(
             metadata=_make_metadata(),
+            deterministic=_make_deterministic(),
             status=VariableStatus.PARTIAL,
         )
         assert vo.status == VariableStatus.PARTIAL
@@ -617,7 +633,7 @@ class TestModelOutput:
     def _make_variable_output(
         self, status: VariableStatus = VariableStatus.SUCCESS
     ) -> VariableOutput:
-        if status == VariableStatus.SUCCESS:
+        if status in (VariableStatus.SUCCESS, VariableStatus.PARTIAL):
             return VariableOutput(
                 metadata=_make_metadata(),
                 deterministic=_make_deterministic(),
@@ -681,10 +697,26 @@ class TestModelOutput:
         )
         assert mo.success is False
 
-    def test_success_true_empty_variables(self) -> None:
-        mo = ModelOutput(
-            model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
-            variables={},
-        )
-        assert mo.success is True
+    def test_empty_model_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="model_name must be a non-empty string"):
+            ModelOutput(
+                model_name="",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"discharge": self._make_variable_output()},
+            )
+
+    def test_whitespace_model_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="model_name must be a non-empty string"):
+            ModelOutput(
+                model_name="   ",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"discharge": self._make_variable_output()},
+            )
+
+    def test_empty_variables_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one entry"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={},
+            )

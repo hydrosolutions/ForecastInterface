@@ -34,10 +34,20 @@ The time step of the data. One of: `sub_hourly`, `hourly`, `sub_daily`, `daily`,
 
 #### 2. Spatial Resolution
 
-How spatial information is represented:
+How spatial information is represented. Keyed by the `SpatialResolution` enum:
 
-- **distributed** — gridded / raster data (spatial variability preserved)
-- **lumped** — spatially aggregated to a single value per unit (e.g. catchment mean)
+- **lumped** — single time series per basin (station observations or basin-averaged values)
+- **hru** — semi-distributed: multiple time series per basin (elevation bands, clusters, HRUs)
+- **gridded** — fully distributed raster data (spatial variability preserved)
+
+The `SpatialInputSpec` model holds a `data` dict keyed by `SpatialResolution`:
+
+```python
+class SpatialInputSpec(BaseModel):
+    data: dict[SpatialResolution, DynamicInputSpec]
+```
+
+A model can require any combination of the three resolutions within the same temporal resolution.
 
 #### 3. Temporality
 
@@ -63,13 +73,13 @@ Each variable declares the following properties:
 | `lookback`     | `int`  | past_known    | Number of past time steps required (must be > 0)             |
 | `future_steps` | `int`  | future_known  | Number of future time steps required (must be > 0)           |
 | `max_nan`      | `int`  | both          | Maximum allowed NaN values in the time series (must be >= 0) |
-| `ensemble`     | `bool` | future_known  | Whether ensemble traces are needed (default: `false`)        |
+| `ensemble_mode`| `EnsembleMode` | future_known  | Whether ensemble or single traces are needed (`single` or `ensemble`, default: `single`) |
 
 ---
 
 ## Static Inputs
 
-A flat list of variable names (`list[str]`).
+An unordered set of variable names (`set[str]`). Duplicates are ignored.
 
 Example: `["catchment_area", "mean_slope", "forest_fraction", "clay_fraction"]`
 
@@ -80,52 +90,63 @@ Example: `["catchment_area", "mean_slope", "forest_fraction", "clay_fraction"]`
 ```yaml
 dynamic:
   daily:
-    lumped:
-      past_known:
-        obs:
-          discharge:
-            lookback: 365
-            max_nan: 10
-          precipitation:
-            lookback: 30
-            max_nan: 5
-      future_known:
-        GFS:
-          precipitation:
-            future_steps: 10
-            max_nan: 0
-            ensemble: true
-          temperature:
-            future_steps: 10
-            max_nan: 0
-            ensemble: false
-        ECMWF:
-          precipitation:
-            future_steps: 15
-            max_nan: 0
-            ensemble: true
-    distributed:
-      past_known:
-        ERA5:
-          swe:
-            lookback: 90
-            max_nan: 5
-          precipitation:
-            lookback: 30
-            max_nan: 3
+    data:
+      lumped:
+        past_known:
+          obs:
+            discharge:
+              lookback: 365
+              max_nan: 10
+            precipitation:
+              lookback: 30
+              max_nan: 5
+        future_known:
+          GFS:
+            precipitation:
+              future_steps: 10
+              max_nan: 0
+              ensemble_mode: ensemble
+            temperature:
+              future_steps: 10
+              max_nan: 0
+              ensemble_mode: single
+          ECMWF:
+            precipitation:
+              future_steps: 15
+              max_nan: 0
+              ensemble_mode: ensemble
+      gridded:
+        past_known:
+          ERA5:
+            swe:
+              lookback: 90
+              max_nan: 5
+            precipitation:
+              lookback: 30
+              max_nan: 3
+      hru:
+        past_known:
+          obs:
+            precipitation:
+              lookback: 30
+              max_nan: 5
+            temperature:
+              lookback: 30
+              max_nan: 3
   hourly:
-    lumped:
-      past_known:
-        obs:
-          discharge:
-            lookback: 72
-            max_nan: 2
-      future_known:
-        INCA:
-          precipitation:
-            future_steps: 48
-            max_nan: 0
-            ensemble: false
+    data:
+      lumped:
+        past_known:
+          obs:
+            discharge:
+              lookback: 72
+              max_nan: 2
+        future_known:
+          INCA:
+            precipitation:
+              future_steps: 48
+              max_nan: 0
+              ensemble_mode: single
 
 static:
   - catchment_area

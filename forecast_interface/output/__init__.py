@@ -1,9 +1,9 @@
 from .flags import ForecastFlag
 from .metadata import VariableMetadata
 from .model_output import ModelOutput
-from .resolutions import Resolution
+from forecast_interface.common.resolutions import TemporalResolution
 from .status import VariableStatus
-from .units import Unit
+from forecast_interface.common.units import Unit
 from .variable_output import (
     DeterministicData,
     EpistemicUncertaintyData,
@@ -18,7 +18,7 @@ __all__ = [
     "ForecastFlag",
     "ModelOutput",
     "QuantileData",
-    "Resolution",
+    "TemporalResolution",
     "TrajectoryData",
     "Unit",
     "VariableMetadata",

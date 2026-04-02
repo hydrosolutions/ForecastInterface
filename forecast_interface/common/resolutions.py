@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class Resolution(Enum):
+class TemporalResolution(Enum):
     SUB_HOURLY = "sub_hourly"
     HOURLY = "hourly"
     SUB_DAILY = "sub_daily"
@@ -10,3 +10,9 @@ class Resolution(Enum):
     MONTHLY = "monthly"
     SEASONAL = "seasonal"
     ANNUAL = "annual"
+
+
+class SpatialResolution(Enum):
+    LUMPED = "lumped"
+    HRU = "hru"
+    GRIDDED = "gridded"

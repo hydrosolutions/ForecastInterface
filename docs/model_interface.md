@@ -57,6 +57,7 @@ Quantile columns are named by their level as strings (e.g., `"0.1"`, `"0.5"`, `"
 Sample columns are named `"1"` through `"<num_samples>"`.
 
 **EpistemicUncertaintyData** — columns: `[issue_datetime, datetime, std, range]`
+Captures model uncertainty as standard deviation and range.
 
 ### VariableOutput
 
@@ -73,3 +74,14 @@ Groups data for a single output variable:
 | `status` | `VariableStatus` | `SUCCESS`, `FAILURE`, or `PARTIAL` |
 
 At least one of `deterministic`, `quantiles`, or `trajectories` must be present when status is `SUCCESS`.
+
+`variables` must contain at least one entry. When status is `PARTIAL`, at least one data representation must still be present (same rule as `SUCCESS`).
+
+### ForecastFlag
+
+Quality flags that can be attached to a variable output:
+
+- `HIGH_EPISTEMIC_UNCERTAINTY` — model confidence is low
+- `DATA_AVAILABILITY` — input data was degraded
+
+A variable with no flags is considered `trusted`.
