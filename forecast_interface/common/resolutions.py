@@ -13,5 +13,6 @@ class TemporalResolution(Enum):
 
 
 class SpatialResolution(Enum):
-    DISTRIBUTED = "distributed"
     LUMPED = "lumped"
+    HRU = "hru"
+    GRIDDED = "gridded"

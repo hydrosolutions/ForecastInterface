@@ -7,6 +7,13 @@ from .input import (
     SpatialInputSpec,
     SpatialResolution,
 )
+from .interface import (
+    FailureCause,
+    ForecastModel,
+    ModelFailure,
+    ModelResult,
+    ModelSuccess,
+)
 from .output import (
     DeterministicData,
     EpistemicUncertaintyData,
@@ -26,10 +33,15 @@ __all__ = [
     "DynamicInputSpec",
     "EnsembleMode",
     "EpistemicUncertaintyData",
+    "FailureCause",
     "ForecastFlag",
+    "ForecastModel",
     "FutureKnownVariable",
     "InputRequirement",
+    "ModelFailure",
     "ModelOutput",
+    "ModelResult",
+    "ModelSuccess",
     "PastKnownVariable",
     "QuantileData",
     "SpatialInputSpec",

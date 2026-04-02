@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator, model_validator
 
-from forecast_interface.common.resolutions import TemporalResolution
+from forecast_interface.common.resolutions import SpatialResolution, TemporalResolution
 
 from .variable import FutureKnownVariable, PastKnownVariable
 
@@ -19,14 +19,17 @@ class DynamicInputSpec(BaseModel):
 
 
 class SpatialInputSpec(BaseModel):
-    distributed: DynamicInputSpec | None = None
-    lumped: DynamicInputSpec | None = None
+    data: dict[SpatialResolution, DynamicInputSpec]
 
-    @model_validator(mode="after")
-    def _at_least_one_spatial(self) -> "SpatialInputSpec":
-        if self.distributed is None and self.lumped is None:
-            raise ValueError("at least one of distributed or lumped must be provided")
-        return self
+    @field_validator("data")
+    @classmethod
+    def _at_least_one_spatial(
+        cls,
+        v: dict[SpatialResolution, DynamicInputSpec],
+    ) -> dict[SpatialResolution, DynamicInputSpec]:
+        if not v:
+            raise ValueError("data must contain at least one spatial resolution")
+        return v
 
 
 class InputRequirement(BaseModel):

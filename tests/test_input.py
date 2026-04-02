@@ -100,40 +100,43 @@ class TestSpatialInputSpec:
         dynamic = DynamicInputSpec(
             past_known={"obs": {"q": PastKnownVariable(lookback=10, max_nan=0)}}
         )
-        spec = SpatialInputSpec(lumped=dynamic)
-        assert spec.lumped is not None
-        assert spec.distributed is None
+        spec = SpatialInputSpec(data={SpatialResolution.LUMPED: dynamic})
+        assert SpatialResolution.LUMPED in spec.data
+        assert len(spec.data) == 1
 
-    def test_distributed_only(self) -> None:
+    def test_gridded_only(self) -> None:
         dynamic = DynamicInputSpec(
             past_known={"ERA5": {"swe": PastKnownVariable(lookback=90, max_nan=5)}}
         )
-        spec = SpatialInputSpec(distributed=dynamic)
-        assert spec.distributed is not None
+        spec = SpatialInputSpec(data={SpatialResolution.GRIDDED: dynamic})
+        assert SpatialResolution.GRIDDED in spec.data
+        assert len(spec.data) == 1
 
     def test_both(self) -> None:
         lumped = DynamicInputSpec(
             past_known={"obs": {"q": PastKnownVariable(lookback=10, max_nan=0)}}
         )
-        distributed = DynamicInputSpec(
+        gridded = DynamicInputSpec(
             past_known={"ERA5": {"swe": PastKnownVariable(lookback=90, max_nan=5)}}
         )
-        spec = SpatialInputSpec(lumped=lumped, distributed=distributed)
-        assert spec.lumped is not None
-        assert spec.distributed is not None
+        spec = SpatialInputSpec(
+            data={SpatialResolution.LUMPED: lumped, SpatialResolution.GRIDDED: gridded}
+        )
+        assert SpatialResolution.LUMPED in spec.data
+        assert SpatialResolution.GRIDDED in spec.data
+        assert len(spec.data) == 2
 
     def test_neither_raises(self) -> None:
-        with pytest.raises(
-            ValidationError, match="at least one of distributed or lumped"
-        ):
-            SpatialInputSpec()
+        with pytest.raises(ValidationError, match="at least one spatial resolution"):
+            SpatialInputSpec(data={})
 
 
 class TestSpatialResolution:
     def test_members(self) -> None:
-        assert SpatialResolution.DISTRIBUTED.value == "distributed"
         assert SpatialResolution.LUMPED.value == "lumped"
-        assert len(SpatialResolution) == 2
+        assert SpatialResolution.HRU.value == "hru"
+        assert SpatialResolution.GRIDDED.value == "gridded"
+        assert len(SpatialResolution) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +149,17 @@ class TestInputRequirement:
         req = InputRequirement(
             dynamic={
                 TemporalResolution.DAILY: SpatialInputSpec(
-                    lumped=DynamicInputSpec(
-                        past_known={
-                            "obs": {
-                                "discharge": PastKnownVariable(lookback=365, max_nan=10)
+                    data={
+                        SpatialResolution.LUMPED: DynamicInputSpec(
+                            past_known={
+                                "obs": {
+                                    "discharge": PastKnownVariable(
+                                        lookback=365, max_nan=10
+                                    )
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 )
             }
         )
@@ -163,11 +170,13 @@ class TestInputRequirement:
         req = InputRequirement(
             dynamic={
                 TemporalResolution.DAILY: SpatialInputSpec(
-                    lumped=DynamicInputSpec(
-                        past_known={
-                            "obs": {"q": PastKnownVariable(lookback=30, max_nan=0)}
-                        }
-                    )
+                    data={
+                        SpatialResolution.LUMPED: DynamicInputSpec(
+                            past_known={
+                                "obs": {"q": PastKnownVariable(lookback=30, max_nan=0)}
+                            }
+                        )
+                    }
                 )
             },
             static={"catchment_area", "mean_slope", "forest_fraction"},
@@ -183,11 +192,15 @@ class TestInputRequirement:
             InputRequirement(
                 dynamic={
                     TemporalResolution.DAILY: SpatialInputSpec(
-                        lumped=DynamicInputSpec(
-                            past_known={
-                                "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
-                            }
-                        )
+                        data={
+                            SpatialResolution.LUMPED: DynamicInputSpec(
+                                past_known={
+                                    "obs": {
+                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                    }
+                                }
+                            )
+                        }
                     )
                 },
                 static={"valid", ""},
@@ -197,11 +210,13 @@ class TestInputRequirement:
         req = InputRequirement(
             dynamic={
                 TemporalResolution.DAILY: SpatialInputSpec(
-                    lumped=DynamicInputSpec(
-                        past_known={
-                            "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
-                        }
-                    )
+                    data={
+                        SpatialResolution.LUMPED: DynamicInputSpec(
+                            past_known={
+                                "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
+                            }
+                        )
+                    }
                 )
             },
             static=[
@@ -217,11 +232,15 @@ class TestInputRequirement:
             InputRequirement(
                 dynamic={
                     TemporalResolution.DAILY: SpatialInputSpec(
-                        lumped=DynamicInputSpec(
-                            past_known={
-                                "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
-                            }
-                        )
+                        data={
+                            SpatialResolution.LUMPED: DynamicInputSpec(
+                                past_known={
+                                    "obs": {
+                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                    }
+                                }
+                            )
+                        }
                     )
                 },
                 static={"  "},
@@ -241,67 +260,73 @@ class TestFullYamlExample:
         return InputRequirement(
             dynamic={
                 TemporalResolution.DAILY: SpatialInputSpec(
-                    lumped=DynamicInputSpec(
-                        past_known={
-                            "obs": {
-                                "discharge": PastKnownVariable(
-                                    lookback=365, max_nan=10
-                                ),
-                                "precipitation": PastKnownVariable(
-                                    lookback=30, max_nan=5
-                                ),
-                            }
-                        },
-                        future_known={
-                            "GFS": {
-                                "precipitation": FutureKnownVariable(
-                                    future_steps=10,
-                                    max_nan=0,
-                                    ensemble_mode=EnsembleMode.ENSEMBLE,
-                                ),
-                                "temperature": FutureKnownVariable(
-                                    future_steps=10,
-                                    max_nan=0,
-                                    ensemble_mode=EnsembleMode.SINGLE,
-                                ),
+                    data={
+                        SpatialResolution.LUMPED: DynamicInputSpec(
+                            past_known={
+                                "obs": {
+                                    "discharge": PastKnownVariable(
+                                        lookback=365, max_nan=10
+                                    ),
+                                    "precipitation": PastKnownVariable(
+                                        lookback=30, max_nan=5
+                                    ),
+                                }
                             },
-                            "ECMWF": {
-                                "precipitation": FutureKnownVariable(
-                                    future_steps=15,
-                                    max_nan=0,
-                                    ensemble_mode=EnsembleMode.ENSEMBLE,
-                                ),
+                            future_known={
+                                "GFS": {
+                                    "precipitation": FutureKnownVariable(
+                                        future_steps=10,
+                                        max_nan=0,
+                                        ensemble_mode=EnsembleMode.ENSEMBLE,
+                                    ),
+                                    "temperature": FutureKnownVariable(
+                                        future_steps=10,
+                                        max_nan=0,
+                                        ensemble_mode=EnsembleMode.SINGLE,
+                                    ),
+                                },
+                                "ECMWF": {
+                                    "precipitation": FutureKnownVariable(
+                                        future_steps=15,
+                                        max_nan=0,
+                                        ensemble_mode=EnsembleMode.ENSEMBLE,
+                                    ),
+                                },
                             },
-                        },
-                    ),
-                    distributed=DynamicInputSpec(
-                        past_known={
-                            "ERA5": {
-                                "swe": PastKnownVariable(lookback=90, max_nan=5),
-                                "precipitation": PastKnownVariable(
-                                    lookback=30, max_nan=3
-                                ),
+                        ),
+                        SpatialResolution.GRIDDED: DynamicInputSpec(
+                            past_known={
+                                "ERA5": {
+                                    "swe": PastKnownVariable(lookback=90, max_nan=5),
+                                    "precipitation": PastKnownVariable(
+                                        lookback=30, max_nan=3
+                                    ),
+                                }
                             }
-                        }
-                    ),
+                        ),
+                    }
                 ),
                 TemporalResolution.HOURLY: SpatialInputSpec(
-                    lumped=DynamicInputSpec(
-                        past_known={
-                            "obs": {
-                                "discharge": PastKnownVariable(lookback=72, max_nan=2),
-                            }
-                        },
-                        future_known={
-                            "INCA": {
-                                "precipitation": FutureKnownVariable(
-                                    future_steps=48,
-                                    max_nan=0,
-                                    ensemble_mode=EnsembleMode.SINGLE,
-                                ),
-                            }
-                        },
-                    )
+                    data={
+                        SpatialResolution.LUMPED: DynamicInputSpec(
+                            past_known={
+                                "obs": {
+                                    "discharge": PastKnownVariable(
+                                        lookback=72, max_nan=2
+                                    ),
+                                }
+                            },
+                            future_known={
+                                "INCA": {
+                                    "precipitation": FutureKnownVariable(
+                                        future_steps=48,
+                                        max_nan=0,
+                                        ensemble_mode=EnsembleMode.SINGLE,
+                                    ),
+                                }
+                            },
+                        )
+                    }
                 ),
             },
             static={"catchment_area", "mean_slope", "forest_fraction"},
@@ -315,32 +340,33 @@ class TestFullYamlExample:
 
     def test_daily_lumped_past(self, full_requirement: InputRequirement) -> None:
         daily = full_requirement.dynamic[TemporalResolution.DAILY]
-        assert daily.lumped is not None
-        obs = daily.lumped.past_known["obs"]
+        lumped = daily.data[SpatialResolution.LUMPED]
+        obs = lumped.past_known["obs"]
         assert obs["discharge"].lookback == 365
         assert obs["precipitation"].max_nan == 5
 
     def test_daily_lumped_future(self, full_requirement: InputRequirement) -> None:
         daily = full_requirement.dynamic[TemporalResolution.DAILY]
-        assert daily.lumped is not None
-        gfs = daily.lumped.future_known["GFS"]
+        lumped = daily.data[SpatialResolution.LUMPED]
+        gfs = lumped.future_known["GFS"]
         assert gfs["precipitation"].ensemble_mode == EnsembleMode.ENSEMBLE
         assert gfs["temperature"].ensemble_mode == EnsembleMode.SINGLE
-        ecmwf = daily.lumped.future_known["ECMWF"]
+        ecmwf = lumped.future_known["ECMWF"]
         assert ecmwf["precipitation"].future_steps == 15
 
-    def test_daily_distributed_past(self, full_requirement: InputRequirement) -> None:
+    def test_daily_gridded_past(self, full_requirement: InputRequirement) -> None:
         daily = full_requirement.dynamic[TemporalResolution.DAILY]
-        assert daily.distributed is not None
-        era5 = daily.distributed.past_known["ERA5"]
+        gridded = daily.data[SpatialResolution.GRIDDED]
+        era5 = gridded.past_known["ERA5"]
         assert era5["swe"].lookback == 90
 
     def test_hourly_block(self, full_requirement: InputRequirement) -> None:
         hourly = full_requirement.dynamic[TemporalResolution.HOURLY]
-        assert hourly.lumped is not None
-        assert hourly.distributed is None
-        assert hourly.lumped.past_known["obs"]["discharge"].lookback == 72
-        assert hourly.lumped.future_known["INCA"]["precipitation"].future_steps == 48
+        assert SpatialResolution.LUMPED in hourly.data
+        assert SpatialResolution.GRIDDED not in hourly.data
+        lumped = hourly.data[SpatialResolution.LUMPED]
+        assert lumped.past_known["obs"]["discharge"].lookback == 72
+        assert lumped.future_known["INCA"]["precipitation"].future_steps == 48
 
     def test_serialization_roundtrip(self, full_requirement: InputRequirement) -> None:
         json_str = full_requirement.model_dump_json()
