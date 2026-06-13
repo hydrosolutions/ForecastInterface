@@ -1,20 +1,26 @@
 # Open Design Questions
 
-Questions to discuss with the model developer before finalizing the interface.
+This file tracks design decisions for the ForecastInterface (FI) — the model-author-facing contract — and the questions still owed to the model developer.
+
+## Context
+
+ForecastInterface (FI) is the contract model authors implement. SAPPHIRE Flow (SAP3) consumes FI models through a thin, planned-but-not-yet-built `ForecastInterfaceAdapter`. Governance (SAP3 doc 014, "ForecastInterface Adapter Design") sets the ownership boundaries:
+
+- **FI OUTPUT types are authoritative** — SAP3 adapts to them.
+- **FI INPUT types are co-designed** via a SAP3 → FI PR.
+- **FI's INTERFACE / protocol is FI-owned**, with SAP3 wrapping thin.
+
+These decisions are reflected in `docs/model_interface.md` and the new `docs/fi-sap3-mapping.md` (the FI ↔ SAP3 adapter mapping). This file does not duplicate their content.
 
 ---
 
-## 1. Multi-Station Model Output
+# 1. Resolved decisions
 
-**Status:** Open, high priority — proposal for discussion
+Questions that SAP3's behaviour already settles. Each is marked resolved with its rationale and where it will be reflected.
 
-### Problem
+## 1.1 Multi-station output structure — RESOLVED
 
-The typical ML model predicts for many stations in one forward pass. Currently `ModelOutput.variables` is `dict[str, VariableOutput]` — keyed by variable name only, with no station dimension. This forces the orchestrator to call the model once per station, losing batching efficiency.
-
-### Proposal
-
-Add a station dimension to `ModelOutput`. The model receives station identifiers in its input data (as a grouping variable to correlate targets with features) and returns per-station results keyed by the same identifiers:
+**Decision:** `ModelOutput.variables` becomes `dict[str, dict[str, VariableOutput]]` (station_id → variable_name → `VariableOutput`).
 
 ```python
 class ModelOutput(BaseModel):
@@ -24,100 +30,97 @@ class ModelOutput(BaseModel):
     #               ^station_id  ^variable_name
 ```
 
-A single-station model simply returns a dict with one key. This keeps one protocol for both cases.
+A single-station model returns a dict with one key, e.g. `{"station_xyz": {"discharge": ..., "water_level": ...}}`. The per-variable DataFrames stay per-station — the station dimension lives in the dict structure, not in a `station_id` column inside the forecast DataFrames.
 
-### How this works in SAPPHIRE_flow today
+**Rationale:** matches SAP3's GROUP-path output `dict[StationId, dict[str, ForecastEnsemble]]` and Nepal requirement §2. Missing stations must be explicit **FAILURE entries**, never absent keys.
 
-SAPPHIRE_flow uses this pattern for group (multi-station) models:
+**Cross-repo note:** this advances a v1-deferred GROUP-path item and requires SAP3's adapter to extend from STATION-only to GROUP — a cross-repo coordination item.
 
-**Input side:** All per-station DataFrames are stacked into one long DataFrame with a `station_id` column (string type, always first column). The model receives one `GroupModelInputs` object containing all stations. A convenience method `for_station(sid)` filters and drops the column, giving clean per-station DataFrames.
+**Reflected in:** `docs/model_interface.md`, `docs/fi-sap3-mapping.md`.
 
-**Output side:** The model returns `dict[StationId, dict[str, ForecastEnsemble]]` — the station dimension is in the dict structure, not in the DataFrames. Each `ForecastEnsemble` is already per-station.
+## 1.2 Target declaration — RESOLVED
 
-**Pattern summary:**
-```
-Input:  stacked DataFrames with station_id column → model
-Output: model → dict[station_id, dict[variable_name, data]]
-```
+**Decision:** FI will declare `target_parameters` (plus, per target, its unit and supported output representation), parallel to feature inputs.
 
-### What changes for the model developer
+**Rationale:** mirrors SAP3's `ModelDataRequirements.target_parameters`. SAP3 doc 014 Task 3 explicitly plans to PR `target_parameters` + `spatial_input_type` into FI's input spec.
 
-- `predict()` returns a `ModelResult` wrapping a `ModelOutput` where `variables` is now `dict[str, dict[str, VariableOutput]]`
-- Station identifiers come from the input data — the model echoes back the same IDs it received
-- The per-variable DataFrames remain per-station (no `station_id` column in the forecast DataFrames themselves)
-- Models that predict for a single station return `{"station_xyz": {"discharge": ..., "water_level": ...}}`
+**Reflected in:** `docs/input_requirement.md` (later phase).
 
-### Questions for the model developer
+## 1.3 Model state — RESOLVED (already)
 
-- Does this match how your models work? (station_id as grouping variable in, per-station results out)
-- Are station identifiers always strings, or do you use typed IDs?
-- Is there a case where the model defines its own spatial units that don't map 1:1 to input station IDs?
+**Decision:** FI stays **state-free**. SAP3's `prior_state` bytes are handled entirely by the adapter. An optional `dump_state()` / `restore_state(bytes)` pair on the protocol is a **future extension only**, not part of the current contract.
 
----
+**Rationale:** state management is orchestrator-side concern (SAP3's `PgModelStateStore`, `WarmUpSource`, `prior_state` on predict). FI's `predict()` has no state parameter and no state in its return.
 
-## 2. Target Variable Declaration
+**Reflected in:** `docs/model_interface.md`.
 
-**Status:** Open
+## 1.4 Spatial vocabulary — RESOLVED
 
-`InputRequirement` declares what data the model consumes, but does not distinguish between **target variables** (what the model forecasts) and **feature variables** (predictors).
+**Decision:** align FI's spatial vocabulary to SAP3's `SpatialRepresentation` enum:
 
-In the current YAML example, `discharge` sits under `past_known` alongside `precipitation` — they look identical structurally. SAPPHIRE_flow's `ModelDataRequirements` has an explicit `target_parameters: frozenset[str]` field.
+| FI value | Notes |
+|---|---|
+| `POINT` | |
+| `BASIN_AVERAGE` | replaces the old `LUMPED` |
+| `ELEVATION_BAND` | replaces the old `HRU` |
+| `GRIDDED` | |
 
-**Key constraint:** Target past observations are NOT always available. Pure simulation/process-based models can forecast a variable without having seen its history.
+Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
-**Questions for the model developer:**
+**Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`.
 
-- Should `InputRequirement` declare which variables are forecast targets? Or should target declaration live elsewhere (e.g. a separate field on the model protocol)?
-- Do your models always have historical observations of the target variable, or do some models forecast without past target data?
-- Should the interface enforce that `ModelOutput.variables` keys match declared targets?
+## 1.5 Quantile floor — RESOLVED (split responsibility)
 
----
+**Decision:** FI proposes a **structural minimum of ≥3 quantiles** (center + two tails). SAP3's operational requirement of **≥7 quantiles with tail coverage** (a level ≤ 0.05 and a level ≥ 0.95) is enforced at the **adapter boundary**, NOT in FI.
 
-## 3. `VariableMetadata` Field Review
+An FI model emitting fewer than 7 quantiles is **structurally valid but NOT operationally usable in SAP3**.
 
-**Status:** Partially resolved
+**Reflected in:** `docs/model_interface.md`, `docs/fi-sap3-mapping.md`.
 
-`VariableMetadata` currently has: `name`, `unit`, `resolution`, `timedelta`, `forecast_horizon`, `offset`.
+## 1.6 Nepal v1 deployment specifics — RESOLVED (model developer)
 
-### Fields confirmed as necessary
-- **`unit`** — consumed by the SAPPHIRE_flow adapter (mapped to string)
-- **`timedelta`** — consumed by the adapter as `time_step`
-- **`resolution`** — not redundant with `timedelta`; it is the categorical label (e.g. SUB_DAILY) that `timedelta` refines (e.g. 15min). Could benefit from a cross-validator.
-- **`offset`** — number of timesteps (of length `timedelta`) between the last observed data point and the first forecast step. Not currently consumed by SAPPHIRE_flow but potentially relevant for lead-time aware skill scoring.
+**Decisions provided by the model developer:**
 
-### Fields to discuss
-- **`name`** — currently redundant with the dict key in `ModelOutput.variables`. No validator enforces `key == metadata.name`. The adapter uses only the dict key. Should we remove `name` and rely solely on the dict key, or add a validator to keep them in sync?
-- **`forecast_horizon`** — never consumed; SAPPHIRE_flow derives the horizon from the DataFrame row count. Is there a use case where a declared horizon that differs from actual rows is meaningful (e.g. the model intended to produce 48 steps but only managed 30)?
+- **First artifact scope: the eastern regional group ships first.** The first production artifact is therefore **GROUP-scoped** (`ArtifactScope.GROUP`). This makes the station-keyed output of decision 1.1 and the GROUP adapter path **load-bearing from day one**, not a later concern.
+- **SnowMapper forcing starts with SWE and ROF** (snow water equivalent and runoff), declared as **banded dynamic forcing at `ELEVATION_BAND`** (see decision 1.4). Specific **lead times** are still to be confirmed — see Q7 residual.
+- **Artifact transfer direction is east → west** (an eastern group artifact applied to western gauges). This makes the embedding-key / station-set-mismatch contract (Nepal §8) concrete: the eastern GROUP artifact **must define its behaviour when applied to the western station set** — handle gracefully or raise an explicit error, never silently associate a station with the wrong embedding.
 
-### DataFrame `issue_datetime` column
-Every DataFrame requires an `issue_datetime` column, but the adapter drops it immediately and uses only the top-level `ModelOutput.issue_datetime` scalar. No cross-validation ensures they match. With multi-station output (question 1), the column could become meaningful (per-station issue times). Should we remove the column requirement for now, or add a validator?
+**Reflected in:** `docs/nepal-model-requirements.md`, `docs/model_interface.md` (artifact portability), `docs/fi-sap3-mapping.md` (artifact metadata ownership).
 
 ---
 
-## 4. Quantile Minimum Count
+# 2. Open questions for the model developer
 
-**Status:** Open
+A decision-ready list. Each needs the model developer's input before the corresponding spec is frozen.
 
-ForecastInterface currently allows ≥1 quantile level. SAPPHIRE_flow requires ≥7 with min ≤ 0.05 and max ≥ 0.95.
+### Q1 — Station ID typing
 
-**Proposal:** Set ForecastInterface minimum to ≥3 (structurally meaningful: center + two tails) and leave SAPPHIRE's stricter constraint as an operational requirement enforced at the adapter boundary.
+SAP3 uses a typed `StationId = NewType(..., UUID)`. Should FI expose **opaque `str` station keys** (the adapter maps them to/from `StationId`), or **adopt typed IDs** directly? And: is there any case where the model defines its own spatial units that do **not** map 1:1 to the input station IDs?
 
-**Question for the model developer:**
-- Is there a valid use case for producing fewer than 3 quantiles?
+### Q2 — Past-target availability
 
----
+Do all your models see the **target's own history**, or do some pure-simulation / process-based models forecast a target **without** any past observations of it? This determines whether past-target is a *required* declared input or an optional one.
 
-## 5. Model State for Recurrent Models
+### Q3 — Quantile minimum
 
-**Status:** Resolved — keep ForecastInterface state-free
+Is there any valid use case for emitting **fewer than 3 quantiles**? (Reminder: anything below 7 is non-operational in SAP3.)
 
-SAPPHIRE_flow manages model state on the orchestrator side (`PgModelStateStore`, `WarmUpSource`, `prior_state` parameter on predict). ForecastInterface's `predict()` has no state parameter and no state in the return.
+### Q4 — State reconstruction
 
-**Decision:** ForecastInterface remains state-free. Stateful models (LSTMs etc.) either:
-- Reconstruct state from the lookback window provided in inputs (warm-up from data)
-- Get state injected by a thin SAPPHIRE_flow adapter wrapping the FI model
+Can every stateful model rebuild its internal state from a **sufficiently long lookback window**, or does any model **strictly require persisted hidden state** between calls? (Confirms decision 1.3 covers all cases.)
 
-If needed later, optional `restore_state(bytes)` / `dump_state() -> bytes` methods on the protocol would be a clean extension.
+### Q5 — `VariableMetadata` fields
 
-**Question for the model developer:**
-- Can your stateful models always reconstruct their internal state from a sufficiently long lookback window? Or do some models strictly require persisted state between calls?
+`VariableMetadata` currently has `name`, `unit`, `resolution`, `timedelta`, `forecast_horizon`, `offset`. Three points to settle:
+
+- **(a) `name`** — redundant with the dict key in `ModelOutput.variables`. Drop `name`, or keep it and add a validator enforcing `key == metadata.name`?
+- **(b) `forecast_horizon`** — this **is consumed** by the (designed) adapter: SAP3 doc 014 (lines 149, 228–229) assigns `ForecastEnsemble.forecast_horizon_steps` directly from `VariableMetadata.forecast_horizon`. The open question is **not** whether to keep it (we do) but whether to add a **cross-validator** that it matches the DataFrame row count.
+- **(c) `offset`** — confirm semantics: number of steps (each of length `timedelta`) between the last observed point and the first forecast step.
+
+### Q6 — Per-row `issue_datetime` column
+
+The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` and renames the per-row datetime column → `valid_time`. The question is whether to **keep the per-row `issue_datetime` column requirement** — with a cross-validator that it matches the top-level `issue_datetime` for forecasts — or **relax it**. Frame this as a validator question, not a removal: the column is not "dropped", it is renamed and re-used.
+
+### Q7 — SnowMapper lead times (residual)
+
+The Nepal deployment specifics are otherwise settled (see decision 1.6): the eastern regional group ships first, SnowMapper forcing starts with **SWE** and **ROF**, and artifact transfer is **east → west**. The one residual: which **lead times** of SWE and ROF will the model consume — past-known lookback, future-known horizon, and how far in each?
