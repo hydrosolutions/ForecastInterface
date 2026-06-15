@@ -13,7 +13,9 @@ uv add forecastinterface
 
 ## ModelOutput
 
-Top-level container holding forecast results for one or more variables. Each variable can independently carry deterministic forecasts, quantile forecasts, trajectory ensembles, or any combination.
+Top-level container holding forecast results, keyed by station then variable. Each variable can independently carry deterministic forecasts, quantile forecasts, trajectory ensembles, or any combination.
+
+`variables` is station-keyed: `station_id → variable_name → VariableOutput`. A single-station model returns a one-key outer dict. Missing stations are explicit `FAILURE` entries (a `VariableOutput` with `status == FAILURE`), never absent keys — the model echoes back every station id it was given.
 
 ### Structure
 
@@ -21,8 +23,8 @@ Top-level container holding forecast results for one or more variables. Each var
 ModelOutput
     model_name: str
     issue_datetime: datetime
-    success: bool                          # derived — True when all variables succeeded
-    variables: dict[str, VariableOutput]   # keyed by variable name
+    success: bool                                    # derived — True when all variables (across all stations) succeeded
+    variables: dict[str, dict[str, VariableOutput]]  # station_id → variable_name → VariableOutput
 
 VariableOutput
     metadata: VariableMetadata
@@ -92,24 +94,26 @@ output = ModelOutput(
     model_name="MyModel",
     issue_datetime=issue_dt,
     variables={
-        "streamflow": VariableOutput(
-            metadata=VariableMetadata(
-                name="streamflow",
-                unit=Unit.M3_PER_S,
-                resolution=TemporalResolution.DAILY,
-                timedelta=timedelta(days=1),
-                forecast_horizon=10,
-                offset=0,
+        "station_1": {
+            "streamflow": VariableOutput(
+                metadata=VariableMetadata(
+                    name="streamflow",
+                    unit=Unit.M3_PER_S,
+                    resolution=TemporalResolution.DAILY,
+                    timedelta=timedelta(days=1),
+                    forecast_horizon=10,
+                    offset=0,
+                ),
+                deterministic=DeterministicData(
+                    data=pl.DataFrame({
+                        "issue_datetime": [issue_dt, issue_dt],
+                        "datetime": [datetime(2024, 6, 1), datetime(2024, 6, 2)],
+                        "value": [42.0, 43.5],
+                    }),
+                ),
+                status=VariableStatus.SUCCESS,
             ),
-            deterministic=DeterministicData(
-                data=pl.DataFrame({
-                    "issue_datetime": [issue_dt, issue_dt],
-                    "datetime": [datetime(2024, 6, 1), datetime(2024, 6, 2)],
-                    "value": [42.0, 43.5],
-                }),
-            ),
-            status=VariableStatus.SUCCESS,
-        ),
+        },
     },
 )
 

@@ -644,33 +644,47 @@ class TestModelOutput:
             status=status,
         )
 
-    def test_valid_construction(self) -> None:
+    def test_valid_single_station(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
             issue_datetime=datetime.datetime(2024, 1, 1),
-            variables={"discharge": self._make_variable_output()},
+            variables={"station_1": {"discharge": self._make_variable_output()}},
         )
         assert mo.model_name == "test_model"
         assert len(mo.variables) == 1
+        assert len(mo.variables["station_1"]) == 1
 
-    def test_multiple_variables(self) -> None:
+    def test_valid_multi_station(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
             issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
-                "discharge": self._make_variable_output(),
-                "temperature": self._make_variable_output(),
+                "station_1": {"discharge": self._make_variable_output()},
+                "station_2": {"discharge": self._make_variable_output()},
             },
         )
         assert len(mo.variables) == 2
+
+    def test_multiple_variables_per_station(self) -> None:
+        mo = ModelOutput(
+            model_name="test_model",
+            issue_datetime=datetime.datetime(2024, 1, 1),
+            variables={
+                "station_1": {
+                    "discharge": self._make_variable_output(),
+                    "temperature": self._make_variable_output(),
+                },
+            },
+        )
+        assert len(mo.variables["station_1"]) == 2
 
     def test_success_all_success(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
             issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
-                "a": self._make_variable_output(VariableStatus.SUCCESS),
-                "b": self._make_variable_output(VariableStatus.SUCCESS),
+                "station_1": {"a": self._make_variable_output(VariableStatus.SUCCESS)},
+                "station_2": {"b": self._make_variable_output(VariableStatus.SUCCESS)},
             },
         )
         assert mo.success is True
@@ -680,8 +694,8 @@ class TestModelOutput:
             model_name="test_model",
             issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
-                "a": self._make_variable_output(VariableStatus.SUCCESS),
-                "b": self._make_variable_output(VariableStatus.FAILURE),
+                "station_1": {"a": self._make_variable_output(VariableStatus.SUCCESS)},
+                "station_2": {"b": self._make_variable_output(VariableStatus.FAILURE)},
             },
         )
         assert mo.success is False
@@ -691,18 +705,51 @@ class TestModelOutput:
             model_name="test_model",
             issue_datetime=datetime.datetime(2024, 1, 1),
             variables={
-                "a": self._make_variable_output(VariableStatus.SUCCESS),
-                "b": self._make_variable_output(VariableStatus.PARTIAL),
+                "station_1": {
+                    "a": self._make_variable_output(VariableStatus.SUCCESS),
+                    "b": self._make_variable_output(VariableStatus.PARTIAL),
+                },
             },
         )
         assert mo.success is False
+
+    def test_explicit_failure_station_makes_success_false(self) -> None:
+        # A station with no usable data is echoed back as an explicit FAILURE
+        # entry, never an absent key; this still constructs but flips success.
+        mo = ModelOutput(
+            model_name="test_model",
+            issue_datetime=datetime.datetime(2024, 1, 1),
+            variables={
+                "station_1": {"discharge": self._make_variable_output()},
+                "station_2": {
+                    "discharge": self._make_variable_output(VariableStatus.FAILURE)
+                },
+            },
+        )
+        assert mo.success is False
+        assert mo.variables["station_2"]["discharge"].status == VariableStatus.FAILURE
+
+    def test_roundtrip_preserves_nested_shape(self) -> None:
+        mo = ModelOutput(
+            model_name="test_model",
+            issue_datetime=datetime.datetime(2024, 1, 1),
+            variables={
+                "station_1": {
+                    "discharge": self._make_variable_output(VariableStatus.FAILURE)
+                },
+            },
+        )
+        restored = ModelOutput.model_validate(mo.model_dump())
+        assert set(restored.variables) == {"station_1"}
+        assert set(restored.variables["station_1"]) == {"discharge"}
+        assert restored.success is False
 
     def test_empty_model_name_rejected(self) -> None:
         with pytest.raises(ValueError, match="model_name must be a non-empty string"):
             ModelOutput(
                 model_name="",
                 issue_datetime=datetime.datetime(2024, 1, 1),
-                variables={"discharge": self._make_variable_output()},
+                variables={"station_1": {"discharge": self._make_variable_output()}},
             )
 
     def test_whitespace_model_name_rejected(self) -> None:
@@ -710,13 +757,53 @@ class TestModelOutput:
             ModelOutput(
                 model_name="   ",
                 issue_datetime=datetime.datetime(2024, 1, 1),
-                variables={"discharge": self._make_variable_output()},
+                variables={"station_1": {"discharge": self._make_variable_output()}},
             )
 
     def test_empty_variables_rejected(self) -> None:
-        with pytest.raises(ValueError, match="at least one entry"):
+        with pytest.raises(ValueError, match="at least one station"):
             ModelOutput(
                 model_name="test_model",
                 issue_datetime=datetime.datetime(2024, 1, 1),
                 variables={},
+            )
+
+    def test_empty_station_map_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one variable"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"station_1": {}},
+            )
+
+    def test_empty_station_id_rejected(self) -> None:
+        with pytest.raises(ValueError, match="station id keys must be non-empty"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"": {"discharge": self._make_variable_output()}},
+            )
+
+    def test_whitespace_station_id_rejected(self) -> None:
+        with pytest.raises(ValueError, match="station id keys must be non-empty"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"   ": {"discharge": self._make_variable_output()}},
+            )
+
+    def test_empty_variable_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="variable name keys must be non-empty"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"station_1": {"": self._make_variable_output()}},
+            )
+
+    def test_whitespace_variable_name_rejected(self) -> None:
+        with pytest.raises(ValueError, match="variable name keys must be non-empty"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1),
+                variables={"station_1": {"   ": self._make_variable_output()}},
             )

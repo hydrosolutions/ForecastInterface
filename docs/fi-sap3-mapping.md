@@ -99,7 +99,8 @@ divergence table (lines 138–151) on the FI side.
 | `VariableMetadata.forecast_horizon: int` (`output/metadata.py:14`) | `ForecastEnsemble.forecast_horizon_steps: int` (`types/ensemble.py:25`) | **DIRECT** — both int, both step counts. **`forecast_horizon` IS consumed by the adapter** (corrects any prior "never consumed" belief). See note below. |
 | `VariableMetadata.timedelta: timedelta` (`output/metadata.py:13`) | `ForecastEnsemble.time_step: timedelta` (`types/ensemble.py:23`) | **DIRECT** assignment. |
 | `VariableMetadata.resolution: TemporalResolution` (`output/metadata.py:12`; enum `common/resolutions.py:4`) | — (no direct target) | Categorical label only; **cross-validate** against `timedelta`, never the conversion source. |
-| `ModelOutput.variables` key / `VariableMetadata.name` (`output/model_output.py:14`, `output/metadata.py:10`) | `ForecastEnsemble.parameter: str` (`types/ensemble.py:23`) | Validate against `ForecastParameter = Literal["discharge","water_level"]` and `ModelDataRequirements.target_parameters` (`types/model.py:261`). |
+| `ModelOutput.variables` inner key / `VariableMetadata.name` (`output/model_output.py`, `output/metadata.py:10`) | `ForecastEnsemble.parameter: str` (`types/ensemble.py:23`) | Validate against `ForecastParameter = Literal["discharge","water_level"]` and `ModelDataRequirements.target_parameters` (`types/model.py:261`). |
+| `ModelOutput.variables` outer key (`output/model_output.py`) | `StationId` (`types/ids.py`) | Station id (opaque `str` on FI side, Q1); adapter maps str → typed `StationId` per GROUP-path decomposition (§5). |
 | empty `ModelOutput.variables` **or** all-`FAILURE` | `ModelOutputError` (`exceptions.py:17`) | Adapter **raises** — zero usable ensembles (doc 014 lines 160–168, 218–223). |
 
 ### Status & flag mapping
@@ -164,15 +165,16 @@ Two horizon notions coexist and must not be conflated:
 
 ### `success` property caveat
 
-`ModelOutput.success` returns `True` when `variables` is empty, because `all()` over an
-empty iterable is `True` (`output/model_output.py:33–36`). The adapter **must not** rely on
-`success` alone to gate conversion (doc 014 lines 219–223).
+`ModelOutput.success` returns `True` over an empty iterable, because `all()` of nothing is
+`True`. The adapter **must not** rely on `success` alone to gate conversion
+(doc 014 lines 219–223).
 
 > **Discrepancy vs doc 014:** Current FI now *forbids* empty `variables` at construction —
-> `ModelOutput._at_least_one_variable` raises if the dict is empty
-> (`output/model_output.py:23–31`). So the empty-variables case is no longer constructible
-> through the public API. The all-`FAILURE` → `ModelOutputError` guard remains live and
-> necessary; the empty-variables guard is now defense-in-depth.
+> `ModelOutput._validate_variables` raises if the outer (station) dict is empty, if any
+> station maps to an empty inner (variable) dict, or if any station-id / variable-name key is
+> empty / whitespace (`output/model_output.py`). So the empty-variables case is no longer
+> constructible through the public API. The all-`FAILURE` → `ModelOutputError` guard remains
+> live and necessary; the empty-variables guard is now defense-in-depth.
 
 ---
 
@@ -231,28 +233,33 @@ member names and values (`types/enums.py:73`), so the mapping is **identity**:
 
 ## 5. Station identity & the GROUP path (Option a)
 
-FI's `ModelOutput.variables` is currently `dict[str, VariableOutput]`
-(`output/model_output.py:14`) — keyed by **variable name**, with no station decomposition.
-SAP3's `GroupForecastModel.predict_batch()` requires per-station results
-(`dict[StationId, ...]`, `protocols/forecast_model.py:63`).
+FI's `ModelOutput.variables` is now **station-keyed**,
+`dict[str, dict[str, VariableOutput]]` (`output/model_output.py`) — keyed first by
+`station_id`, then by `variable_name`. SAP3's `GroupForecastModel.predict_batch()` requires
+per-station results (`dict[StationId, ...]`, `protocols/forecast_model.py:63`).
 
-**Decision recorded (doc 014 "Option (a)", lines 208–217):** FI adopts **station-keyed
-output** so the GROUP-path adapter can map per-station 1:1:
+**Decision realized (doc 014 "Option (a)", lines 208–217):** FI adopts **station-keyed
+output** so the GROUP-path adapter can map per-station 1:1. This realizes the GROUP-path
+per-station decomposition (Option a):
 
 ```
 ModelOutput.variables : dict[station_id, dict[variable, VariableOutput]]
 ```
 
 - Single-station models return a **one-key dict** (one station id → its variable map).
+- Missing stations are **explicit `FAILURE` entries** (the model echoes back every station
+  id it was given), never absent keys.
 - The STATION-path adapter unwraps the single key into
   `tuple[dict[str, ForecastEnsemble], bytes | None]`.
 - The GROUP-path adapter maps each station key → one `(forecast_dict, state)` entry of the
   `dict[StationId, tuple[...]]` return.
+- Station ids are opaque `str` on the FI side (open item Q1); the adapter maps str → typed
+  `StationId` (UUID) at the boundary.
 
 **Cross-repo coordination item (FLAG):** SAP3's adapter design in doc 014 is currently
-**STATION-path-only** for v0b (lines 208–217 explicitly defer GROUP support). When FI moves
-to station-keyed output, SAP3's `ForecastInterfaceAdapter` must be extended to consume it.
-Until both sides land this change, GROUP-path FI wrapping is not possible. This is the
+**STATION-path-only** for v0b (lines 208–217 explicitly defer GROUP support). Now that FI
+has moved to station-keyed output, SAP3's `ForecastInterfaceAdapter` must be extended to
+consume it. Until SAP3 lands its side, GROUP-path FI wrapping is not possible. This is the
 single largest open structural divergence between the two repos.
 
 ---

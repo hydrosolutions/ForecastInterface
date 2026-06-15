@@ -48,18 +48,20 @@ def _make_model_output() -> ModelOutput:
         model_name="test_model",
         issue_datetime=_ISSUE_DT,
         variables={
-            "discharge": VariableOutput(
-                metadata=VariableMetadata(
-                    name="discharge",
-                    unit=Unit.M3_PER_S,
-                    resolution=TemporalResolution.DAILY,
-                    timedelta=timedelta(days=1),
-                    forecast_horizon=10,
-                    offset=0,
-                ),
-                deterministic=DeterministicData(data=df),
-                status=VariableStatus.SUCCESS,
-            )
+            "station_1": {
+                "discharge": VariableOutput(
+                    metadata=VariableMetadata(
+                        name="discharge",
+                        unit=Unit.M3_PER_S,
+                        resolution=TemporalResolution.DAILY,
+                        timedelta=timedelta(days=1),
+                        forecast_horizon=10,
+                        offset=0,
+                    ),
+                    deterministic=DeterministicData(data=df),
+                    status=VariableStatus.SUCCESS,
+                )
+            }
         },
     )
 
