@@ -12,7 +12,8 @@ class TemporalResolution(Enum):
     ANNUAL = "annual"
 
 
-class SpatialResolution(Enum):
-    LUMPED = "lumped"
-    HRU = "hru"
+class SpatialRepresentation(Enum):
+    POINT = "point"
+    BASIN_AVERAGE = "basin_average"
+    ELEVATION_BAND = "elevation_band"
     GRIDDED = "gridded"

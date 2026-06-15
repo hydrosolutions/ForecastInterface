@@ -8,9 +8,11 @@ from pydantic import ValidationError
 from forecast_interface.input import (
     DynamicInputSpec,
     InputRequirement,
+    OutputRepresentation,
     PastKnownVariable,
     SpatialInputSpec,
-    SpatialResolution,
+    SpatialRepresentation,
+    TargetSpec,
     TemporalResolution as InputTemporalResolution,
 )
 from forecast_interface.interface import (
@@ -64,17 +66,23 @@ def _make_model_output() -> ModelOutput:
 
 def _make_input_requirement() -> InputRequirement:
     return InputRequirement(
+        targets={
+            "q": TargetSpec(
+                unit=Unit.M3_PER_S,
+                representations=frozenset({OutputRepresentation.DETERMINISTIC}),
+            )
+        },
         dynamic={
             InputTemporalResolution.DAILY: SpatialInputSpec(
                 data={
-                    SpatialResolution.LUMPED: DynamicInputSpec(
+                    SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                         past_known={
                             "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
                         }
                     )
                 }
             )
-        }
+        },
     )
 
 

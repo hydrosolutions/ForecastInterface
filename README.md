@@ -126,12 +126,16 @@ See [Input Requirement Specification](docs/input_requirement.md) for full docume
 
 ```
 InputRequirement
+    targets: dict[str, TargetSpec]                  # what the model forecasts
     dynamic: dict[TemporalResolution, SpatialInputSpec]
     static: set[str]
 
+TargetSpec
+    unit: Unit
+    representations: frozenset[OutputRepresentation]  # DETERMINISTIC | QUANTILES | TRAJECTORIES
+
 SpatialInputSpec
-    distributed: DynamicInputSpec | None
-    lumped: DynamicInputSpec | None
+    data: dict[SpatialRepresentation, DynamicInputSpec]
 
 DynamicInputSpec
     past_known: dict[str, dict[str, PastKnownVariable]]
@@ -146,3 +150,9 @@ FutureKnownVariable
     max_nan: int
     ensemble_mode: EnsembleMode    # SINGLE or ENSEMBLE
 ```
+
+### Enums
+
+**SpatialRepresentation** -- `POINT`, `BASIN_AVERAGE`, `ELEVATION_BAND`, `GRIDDED`
+
+**OutputRepresentation** -- `DETERMINISTIC`, `QUANTILES`, `TRAJECTORIES`

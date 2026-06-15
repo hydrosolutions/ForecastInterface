@@ -1,10 +1,14 @@
-from forecast_interface.common.resolutions import SpatialResolution, TemporalResolution
+from forecast_interface.common.resolutions import (
+    SpatialRepresentation,
+    TemporalResolution,
+)
 
 from .requirement import (
     DynamicInputSpec,
     InputRequirement,
     SpatialInputSpec,
 )
+from .target import OutputRepresentation, TargetSpec
 from .variable import EnsembleMode, FutureKnownVariable, PastKnownVariable
 
 __all__ = [
@@ -12,8 +16,10 @@ __all__ = [
     "EnsembleMode",
     "FutureKnownVariable",
     "InputRequirement",
+    "OutputRepresentation",
     "PastKnownVariable",
-    "SpatialResolution",
-    "TemporalResolution",
     "SpatialInputSpec",
+    "SpatialRepresentation",
+    "TargetSpec",
+    "TemporalResolution",
 ]

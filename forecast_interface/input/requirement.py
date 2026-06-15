@@ -1,7 +1,11 @@
 from pydantic import BaseModel, field_validator, model_validator
 
-from forecast_interface.common.resolutions import SpatialResolution, TemporalResolution
+from forecast_interface.common.resolutions import (
+    SpatialRepresentation,
+    TemporalResolution,
+)
 
+from .target import TargetSpec
 from .variable import FutureKnownVariable, PastKnownVariable
 
 
@@ -19,22 +23,38 @@ class DynamicInputSpec(BaseModel):
 
 
 class SpatialInputSpec(BaseModel):
-    data: dict[SpatialResolution, DynamicInputSpec]
+    data: dict[SpatialRepresentation, DynamicInputSpec]
 
     @field_validator("data")
     @classmethod
     def _at_least_one_spatial(
         cls,
-        v: dict[SpatialResolution, DynamicInputSpec],
-    ) -> dict[SpatialResolution, DynamicInputSpec]:
+        v: dict[SpatialRepresentation, DynamicInputSpec],
+    ) -> dict[SpatialRepresentation, DynamicInputSpec]:
         if not v:
-            raise ValueError("data must contain at least one spatial resolution")
+            raise ValueError("data must contain at least one spatial representation")
         return v
 
 
 class InputRequirement(BaseModel):
+    # Targets are declared independently of inputs; a model needing the target's own
+    # history lists it under past_known (see Q2 in open_design_questions.md).
+    targets: dict[str, TargetSpec]
     dynamic: dict[TemporalResolution, SpatialInputSpec]
     static: set[str] = set()
+
+    @field_validator("targets")
+    @classmethod
+    def _at_least_one_target(
+        cls,
+        v: dict[str, TargetSpec],
+    ) -> dict[str, TargetSpec]:
+        if not v:
+            raise ValueError("targets must contain at least one entry")
+        for name in v:
+            if not name or not name.strip():
+                raise ValueError("target variable names must be non-empty strings")
+        return v
 
     @field_validator("dynamic")
     @classmethod

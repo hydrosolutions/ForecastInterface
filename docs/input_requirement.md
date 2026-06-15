@@ -6,10 +6,32 @@ All declared inputs are **required** — the pipeline fails if any are missing.
 
 ## Input Categories
 
-Two top-level categories:
+Three top-level declarations:
 
-1. **Dynamic inputs** — time-varying data (e.g. discharge, precipitation, temperature)
-2. **Static inputs** — time-invariant attributes (e.g. catchment area, slope, land cover fraction)
+1. **Targets** — what the model forecasts (the output variables and their supported representations)
+2. **Dynamic inputs** — time-varying data (e.g. discharge, precipitation, temperature)
+3. **Static inputs** — time-invariant attributes (e.g. catchment area, slope, land cover fraction)
+
+---
+
+## Targets
+
+A model must declare what it forecasts. `targets` is a dict keyed by variable name, each mapping to a `TargetSpec`:
+
+```python
+class TargetSpec(BaseModel):
+    unit: Unit
+    representations: frozenset[OutputRepresentation]
+```
+
+- **unit** — the physical unit of the target (e.g. `Unit.M3_PER_S`).
+- **representations** — the output forms the model can produce for this target, a non-empty set of `OutputRepresentation`: `deterministic`, `quantiles`, `trajectories`. A target may support more than one form.
+
+The combinability rule (whether a target's forecasts can be BMA-combined) is derived downstream from whether `TRAJECTORIES` is present; it is not encoded here.
+
+Targets are declared **independently** of inputs. A model that needs the target's own past history simply lists that variable under `past_known` in its dynamic inputs; a pure-simulation model omits it. (See Q2 in `open_design_questions.md`.)
+
+`targets` must contain at least one entry — a model must forecast something.
 
 ---
 
@@ -32,22 +54,23 @@ temporal_resolution
 
 The time step of the data. One of: `sub_hourly`, `hourly`, `sub_daily`, `daily`, `weekly`, `monthly`, `seasonal`, `annual`.
 
-#### 2. Spatial Resolution
+#### 2. Spatial Representation
 
-How spatial information is represented. Keyed by the `SpatialResolution` enum:
+How spatial information is represented. Keyed by the `SpatialRepresentation` enum (values mirror SAP3's enum, so the adapter mapping is identity):
 
-- **lumped** — single time series per basin (station observations or basin-averaged values)
-- **hru** — semi-distributed: multiple time series per basin (elevation bands, clusters, HRUs)
+- **point** — a single point location (e.g. a gauge or grid-cell extraction)
+- **basin_average** — single time series per basin (station observations or basin-averaged values)
+- **elevation_band** — semi-distributed: one time series per elevation band (e.g. banded SnowMapper forcing such as `swe` and `rof` is declared at `elevation_band`)
 - **gridded** — fully distributed raster data (spatial variability preserved)
 
-The `SpatialInputSpec` model holds a `data` dict keyed by `SpatialResolution`:
+The `SpatialInputSpec` model holds a `data` dict keyed by `SpatialRepresentation`:
 
 ```python
 class SpatialInputSpec(BaseModel):
-    data: dict[SpatialResolution, DynamicInputSpec]
+    data: dict[SpatialRepresentation, DynamicInputSpec]
 ```
 
-A model can require any combination of the three resolutions within the same temporal resolution.
+A model can require any combination of representations within the same temporal resolution.
 
 #### 3. Temporality
 
@@ -88,10 +111,17 @@ Example: `["catchment_area", "mean_slope", "forest_fraction", "clay_fraction"]`
 ## Full Example
 
 ```yaml
+targets:
+  discharge:
+    unit: "m³/s"
+    representations:
+      - quantiles
+      - trajectories
+
 dynamic:
   daily:
     data:
-      lumped:
+      basin_average:
         past_known:
           obs:
             discharge:
@@ -124,18 +154,20 @@ dynamic:
             precipitation:
               lookback: 30
               max_nan: 3
-      hru:
-        past_known:
-          obs:
-            precipitation:
-              lookback: 30
-              max_nan: 5
-            temperature:
-              lookback: 30
-              max_nan: 3
+      elevation_band:
+        future_known:
+          SnowMapper:
+            swe:
+              future_steps: 10
+              max_nan: 0
+              ensemble_mode: single
+            rof:
+              future_steps: 10
+              max_nan: 0
+              ensemble_mode: single
   hourly:
     data:
-      lumped:
+      basin_average:
         past_known:
           obs:
             discharge:

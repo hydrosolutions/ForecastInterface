@@ -1,13 +1,15 @@
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from .input import (
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
     InputRequirement,
+    OutputRepresentation,
     PastKnownVariable,
     SpatialInputSpec,
-    SpatialResolution,
+    SpatialRepresentation,
+    TargetSpec,
 )
 from .interface import (
     FailureCause,
@@ -44,10 +46,12 @@ __all__ = [
     "ModelOutput",
     "ModelResult",
     "ModelSuccess",
+    "OutputRepresentation",
     "PastKnownVariable",
     "QuantileData",
     "SpatialInputSpec",
-    "SpatialResolution",
+    "SpatialRepresentation",
+    "TargetSpec",
     "TemporalResolution",
     "TrajectoryData",
     "Unit",

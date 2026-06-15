@@ -1,8 +1,8 @@
-from .resolutions import SpatialResolution, TemporalResolution
+from .resolutions import SpatialRepresentation, TemporalResolution
 from .units import Unit
 
 __all__ = [
-    "SpatialResolution",
+    "SpatialRepresentation",
     "TemporalResolution",
     "Unit",
 ]

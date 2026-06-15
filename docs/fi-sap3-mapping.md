@@ -192,8 +192,8 @@ discrepancy note at the end of this section.
 | `PastKnownVariable.lookback` (`input/variable.py:12`) | `lookback_steps: int` (line 266) |
 | `FutureKnownVariable.future_steps` (`input/variable.py:31`) | `forecast_horizon_steps: int` (line 267) |
 | `TemporalResolution` keys + `VariableMetadata.timedelta` | `supported_time_steps: frozenset[timedelta]` (line 265) |
-| `SpatialResolution` keys (`input/requirement.py:22`) | `spatial_input_type: SpatialRepresentation` (line 268) |
-| *(no FI equivalent yet)* — proposed by SAP3 PR | `target_parameters: frozenset[str]` (line 261) |
+| `SpatialRepresentation` keys (`input/requirement.py`) | `spatial_input_type: SpatialRepresentation` (line 268) |
+| `InputRequirement.targets` keys + `TargetSpec.unit`/`.representations` (`input/target.py`) | `target_parameters: frozenset[str]` (line 261) |
 | `PastKnownVariable.max_nan` / `FutureKnownVariable.max_nan` (`input/variable.py:13,32`) | Derivable from SAP3 QC config (doc 014 line 273) |
 | `FutureKnownVariable.ensemble_mode` (`input/variable.py:33`) | Derivable from NWP ensemble config (doc 014 line 273) |
 
@@ -214,19 +214,18 @@ to the FI model via the adapter. The slots are identical for station and group:
 
 ### Spatial enum mapping (FI → SAP3)
 
-FI `SpatialResolution` (`common/resolutions.py:15`) → SAP3 `SpatialRepresentation`
-(`types/enums.py:73`):
+As of Phase 1, FI's `SpatialRepresentation` (`common/resolutions.py`) adopts SAP3's exact
+member names and values (`types/enums.py:73`), so the mapping is **identity**:
 
-| FI `SpatialResolution` | SAP3 `SpatialRepresentation` |
+| FI `SpatialRepresentation` | SAP3 `SpatialRepresentation` |
 |---|---|
-| `LUMPED` | `BASIN_AVERAGE` (`"basin_average"`) |
-| `HRU` | `ELEVATION_BAND` (`"elevation_band"`) |
-| `GRIDDED` | `GRIDDED` (`"gridded"`) |
-| *(new in FI — proposed)* `POINT` | `POINT` (`"point"`) |
+| `POINT` (`"point"`) | `POINT` (`"point"`) |
+| `BASIN_AVERAGE` (`"basin_average"`) | `BASIN_AVERAGE` (`"basin_average"`) |
+| `ELEVATION_BAND` (`"elevation_band"`) | `ELEVATION_BAND` (`"elevation_band"`) |
+| `GRIDDED` (`"gridded"`) | `GRIDDED` (`"gridded"`) |
 
-> SAP3 has a `POINT` member already (`types/enums.py:74`); FI's `SpatialResolution`
-> currently has only `LUMPED`/`HRU`/`GRIDDED` (`common/resolutions.py:16–18`). Adding
-> `POINT` to FI is part of the SAP3→FI input PR (see Open Items §8).
+> The earlier `LUMPED`/`HRU` names were renamed to `BASIN_AVERAGE`/`ELEVATION_BAND` and
+> `POINT` was added, completing the alignment proposed in the SAP3→FI input PR.
 
 ---
 
@@ -317,5 +316,5 @@ FI/artifact side answers *"what is this model and how was it built"*; SAP3 side 
 | 5 | Epistemic uncertainty | `EpistemicUncertaintyData` is dropped at the boundary in v0b (doc 014 lines 197–204). Revisit (add to `ForecastEnsemble` / store as metadata) if models emit it. |
 | 6 | Interface module now exists | doc 014 assumes FI's `interface/` is unimplemented (lines 80, 287). It is now implemented (`ForecastModel`, `ModelResult`, `FailureCause`). SAP3 should re-evaluate Tasks 4–5 against the real protocol. |
 | 7 | `ModelResult` failure channel | FI now returns `ModelResult = ModelSuccess \| ModelFailure` (`interface/result.py:40`) with a `FailureCause` enum (`interface/failure.py:4`). SAP3's `ModelOutputError` path must account for the `ModelFailure` branch, not only all-`FAILURE` `ModelOutput`. |
-| 8 | Resolution enum split | FI split into `TemporalResolution` + `SpatialResolution` (`common/resolutions.py`); doc 014 references a single `Resolution`. Mapping tables above use the current split. |
+| 8 | Resolution enum split | FI split into `TemporalResolution` + `SpatialRepresentation` (`common/resolutions.py`); doc 014 references a single `Resolution`. Mapping tables above use the current split. |
 ```
