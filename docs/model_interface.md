@@ -2,7 +2,7 @@
 
 The primary goal of this package is to define the interface between any forecasting library and the forecasting model. The forecasting model can be implemented in any package / code base but needs to follow the protocol defined here.
 
-There is **one unified protocol**: `ForecastModel`. The scope of a model (single station vs. group / national) is **declared**, not split into separate protocols. SAP3 consumes the FI protocol through a thin adapter that dispatches to its own `StationForecastModel` / `GroupForecastModel` — see [`docs/fi-sap3-mapping.md`](./fi-sap3-mapping.md). The driving requirements for the first (Nepal v1) integration are in [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md).
+There are **two protocols**: the required `ForecastModel`, and `RetrainableModel` (which extends `ForecastModel`) for the optional warm-start retrain capability. The scope of a model (single station vs. group / national) is **declared** via `artifact_scope`, not split into separate protocols. SAP3 consumes the FI protocol through a thin adapter that dispatches to its own `StationForecastModel` / `GroupForecastModel` — see [`docs/fi-sap3-mapping.md`](./fi-sap3-mapping.md). The driving requirements for the first (Nepal v1) integration are in [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md).
 
 Core functionalities include:
 
@@ -17,36 +17,38 @@ Produce a `TrainedArtifact` from training inputs. See the Training & Lifecycle P
 
 ---
 
-## Training & Lifecycle Protocol (target spec)
+## Training & Lifecycle Protocol
 
-> **Status: target contract.** This section describes the protocol surface FI is committed to, settled by the Nepal v1 decisions. It is **not yet reflected in `forecast_interface/` code**. The current `forecast_interface/interface/protocol.py` exposes only `input_requirement`, `predict(*, inputs, issue_datetime)` and `hindcast(*, inputs, issue_datetime)` — with **no** `TrainedArtifact`, **no** `rng`, and **no** training methods. The implementation lands in a later phase; this is the forward target.
+> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` and `config` parameters remain **provisional** — typed `Any` until the assembled-input bundle and model-config types are co-designed with SAP3 (doc 014 Task 3, the SAP3→FI input-types PR). Rich `TrainedArtifact` provenance metadata and the group-artifact embedding-key / station-set-mismatch contract are **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4 and §8).
 
 ### Scope: `ArtifactScope`
 
-A model declares its scope rather than implementing a scope-specific protocol.
+A model declares its scope via the `artifact_scope` attribute rather than implementing a scope-specific protocol.
 
 ```python
 class ArtifactScope(Enum):
-    STATION = auto()  # one artifact per station
-    GROUP = auto()    # one artifact covering multiple stations
+    STATION = "station"  # one artifact per station
+    GROUP = "group"      # one artifact covering multiple stations
 ```
 
-A "national-group" model is a `GROUP` (it is just a group whose station set happens to be national). There is no separate national scope.
+A "national-group" model is a `GROUP` (it is just a group whose station set happens to be national). There is no separate national scope. (SAP3 has an internal `VIRTUAL` scope for combination models; that is SAP3-internal and not model-author-facing, so it is not part of this enum.)
 
 ### The `ForecastModel` protocol surface
 
-| Member | Signature | Required? | Notes |
-|---|---|---|---|
-| `input_requirement` | `property -> InputRequirement` | required | Declares data needs **and** `target_parameters` (the targets, parallel to features). |
-| `artifact_scope` | `property -> ArtifactScope` | required | Declared scope (`STATION` / `GROUP`). |
-| `train` | `train(inputs, *, config, rng) -> TrainedArtifact` | **required** | Cold, full rebuild from scratch. This is the required baseline every model must support. |
-| `retrain` | `retrain(base_artifact, inputs, *, config, rng) -> TrainedArtifact` | optional | Warm-start from an existing artifact, for models capable of it. Models that cannot warm-start simply do not implement it; callers fall back to `train`. |
-| `predict` | `predict(artifact, *, inputs, issue_datetime, rng) -> ModelResult` | required | Forecast. Returns FI's `ModelResult` → `ModelOutput`. |
-| `hindcast` | `hindcast(artifact, *, inputs, issue_datetime, rng) -> ModelResult` | required | Hindcast. Same return type as `predict`. |
-| `serialize_artifact` | `serialize_artifact(artifact) -> bytes` | required | Opaque byte serialization of a `TrainedArtifact`. |
-| `deserialize_artifact` | `deserialize_artifact(raw: bytes) -> TrainedArtifact` | required | Inverse of `serialize_artifact`. |
+`train`, `predict`, `hindcast`, `serialize_artifact` and `deserialize_artifact` are **required**. The optional warm-start `retrain` lives on a **separate** protocol, `RetrainableModel` (which extends `ForecastModel`), so it is not forced on every model. SAP3 checks `isinstance(model, RetrainableModel)` to know whether warm-start is supported; otherwise it falls back to `train`.
 
-`input_requirement.target_parameters` declares the model's prediction targets alongside its feature requirements. (The current `InputRequirement` has only `dynamic` / `static` feature declarations; `target_parameters` is part of this forward spec.)
+| Member | Signature | Protocol | Notes |
+|---|---|---|---|
+| `input_requirement` | `property -> InputRequirement` | `ForecastModel` | Declares data needs **and forecast targets** — `InputRequirement.targets` (`dict[str, TargetSpec]`) names each target variable with its `unit` and supported output `representations` (see `docs/input_requirement.md`). |
+| `artifact_scope` | `attribute: ArtifactScope` | `ForecastModel` | Declared scope (`STATION` / `GROUP`). |
+| `train` | `train(inputs, *, config, rng) -> TrainedArtifact` | `ForecastModel` | Cold, full rebuild from scratch. The required baseline every model must support. |
+| `predict` | `predict(artifact, *, inputs, issue_datetime, rng) -> ModelResult` | `ForecastModel` | Forecast. Returns FI's `ModelResult` → `ModelOutput`. |
+| `hindcast` | `hindcast(artifact, *, inputs, issue_datetime, rng) -> ModelResult` | `ForecastModel` | Hindcast. Same return type as `predict`. |
+| `serialize_artifact` | `serialize_artifact(artifact) -> bytes` | `ForecastModel` | Opaque byte serialization of a `TrainedArtifact`. |
+| `deserialize_artifact` | `deserialize_artifact(raw: bytes) -> TrainedArtifact` | `ForecastModel` | Inverse of `serialize_artifact`. |
+| `retrain` | `retrain(base_artifact, inputs, *, config, rng) -> TrainedArtifact` | `RetrainableModel` | **Optional.** Warm-start from an existing artifact, for models capable of it. Models that cannot warm-start simply do not implement it; callers fall back to `train`. |
+
+The `inputs` and `config` parameters are typed `Any` (provisional, see status note above).
 
 ### Determinism (dependency injection)
 
@@ -54,13 +56,13 @@ A "national-group" model is a `GROUP` (it is just a group whose station set happ
 
 ### `TrainedArtifact`
 
-A `TrainedArtifact` is an **opaque, self-contained, deployment-portable** object representing everything a model needs to produce forecasts:
+`TrainedArtifact` is implemented as a **marker `Protocol`** (no members) — a semantic boundary type. It is an **opaque, self-contained, deployment-portable** object representing everything a model needs to produce forecasts:
 
 - **Opaque** to FI: FI never inspects its internals. It is produced by `train` / `retrain` and consumed by `predict` / `hindcast`.
 - **Self-contained**: `serialize_artifact` produces `bytes` that embed all weights, scalers, and metadata — **with no absolute filesystem paths** and no machine-local references.
 - **Deployment-portable**: `deserialize_artifact(serialize_artifact(a))` must reconstruct an artifact that runs **unchanged on another SAP3 instance**.
 
-**Group / national artifacts and station identity.** An artifact whose scope is `GROUP` typically embeds the station identifiers it was trained on. Such artifacts **must document their embedding key** (how station IDs are stored and matched). They **must also define behaviour when the station set at predict time differs** from the trained set — either handle the mismatch gracefully (e.g. predict only for known stations, emit explicit `FAILURE` entries for unknown ones) or raise an explicit error. A group artifact must **never silently mis-associate** a prediction with the wrong station.
+**Deferred to Phase 4.** Rich provenance metadata (scope, region, training period, hashes, seed, product versions) and the group-artifact embedding-key / station-set-mismatch contract are **not** part of the marker Protocol yet; they land in Phase 4 (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4 and §8). The intended contract: an artifact whose scope is `GROUP` typically embeds the station identifiers it was trained on, must document its embedding key, must define behaviour when the predict-time station set differs from the trained set, and must **never silently mis-associate** a prediction with the wrong station.
 
 ### State-free
 

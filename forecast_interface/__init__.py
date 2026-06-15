@@ -1,4 +1,4 @@
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 from .input import (
     DynamicInputSpec,
@@ -12,11 +12,14 @@ from .input import (
     TargetSpec,
 )
 from .interface import (
+    ArtifactScope,
     FailureCause,
     ForecastModel,
     ModelFailure,
     ModelResult,
     ModelSuccess,
+    RetrainableModel,
+    TrainedArtifact,
 )
 from .output import (
     DeterministicData,
@@ -33,6 +36,7 @@ from .output import (
 )
 
 __all__ = [
+    "ArtifactScope",
     "DeterministicData",
     "DynamicInputSpec",
     "EnsembleMode",
@@ -49,10 +53,12 @@ __all__ = [
     "OutputRepresentation",
     "PastKnownVariable",
     "QuantileData",
+    "RetrainableModel",
     "SpatialInputSpec",
     "SpatialRepresentation",
     "TargetSpec",
     "TemporalResolution",
+    "TrainedArtifact",
     "TrajectoryData",
     "Unit",
     "VariableMetadata",
