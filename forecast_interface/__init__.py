@@ -1,15 +1,20 @@
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 from .common import AggregationMethod
 from .input import (
+    DynamicInputs,
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
     InputRequirement,
+    InputSeries,
+    ModelInputs,
     OutputRepresentation,
     PastKnownVariable,
+    SpatialInputs,
     SpatialInputSpec,
     SpatialRepresentation,
+    StationInputs,
     TargetSpec,
 )
 from .interface import (
@@ -39,6 +44,7 @@ __all__ = [
     "AggregationMethod",
     "ArtifactScope",
     "DeterministicData",
+    "DynamicInputs",
     "DynamicInputSpec",
     "EnsembleMode",
     "EpistemicUncertaintyData",
@@ -47,7 +53,9 @@ __all__ = [
     "ForecastModel",
     "FutureKnownVariable",
     "InputRequirement",
+    "InputSeries",
     "ModelFailure",
+    "ModelInputs",
     "ModelOutput",
     "ModelResult",
     "ModelSuccess",
@@ -55,8 +63,10 @@ __all__ = [
     "PastKnownVariable",
     "QuantileData",
     "RetrainableModel",
+    "SpatialInputs",
     "SpatialInputSpec",
     "SpatialRepresentation",
+    "StationInputs",
     "TargetSpec",
     "TrainedArtifact",
     "TrajectoryData",

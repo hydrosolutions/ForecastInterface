@@ -119,6 +119,19 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Reflected in:** `docs/model_interface.md`.
 
+## 1.15 Forecast horizon ownership & issue context — RESOLVED
+
+**Decision:** the **model owns the forecast horizon** — it is not requested by SAP3.
+
+- Three quantities: **capability** (model's max, from training), **forcing-limited** (bounded by delivered `future_steps`), **actual** (= f(capability, forcing)). Only the model knows capability and sees forcing, so only the model computes the actual horizon.
+- The model **declares the actual horizon in `metadata.forecast_horizon`** (already in the output, per-variable). SAP3 **checks** it against operational need and flags/rejects if too short (loud-at-boundary), but never dictates it.
+- **The bundle (`ModelInputs`) carries no issue scalar at all — it is pure data.** `issue_datetime` (predict) and `issue_datetimes` (batch hindcast) are **separate protocol parameters**, not bundle fields — training has no single issue time, and batch hindcast has many. No requested horizon and no output `time_step` either: the model forecasts at its own trained step/horizon. `future_steps` stays purely forcing extent. `ModelInputs` is therefore uniform across train / predict / hindcast.
+- **Multi-horizon / multi-timestep is already structurally supported** — each `VariableOutput` carries its own `metadata.timedelta` + `forecast_horizon`. "Single horizon + single output step" is a v0 *convention*; going multi is a zero-schema-change additive step.
+
+**Deferred (YAGNI):** an optional declared horizon-*capability* field in the input spec for integration-time validation; the output declaration + SAP3's check suffice. Add only if SAP3 needs to validate horizon before the first run.
+
+**Reflected in:** `docs/model_interface.md` (issue context), future `ModelInputs` type (A2).
+
 ## 1.14 Output combinability — RESOLVED
 
 **Decision:** combinability is **derived from the output representation**, with no new FI machinery.
