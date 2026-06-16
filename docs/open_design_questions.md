@@ -119,6 +119,58 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Reflected in:** `docs/model_interface.md`.
 
+## 1.14 Output combinability — RESOLVED
+
+**Decision:** combinability is **derived from the output representation**, with no new FI machinery.
+
+- A target supporting **`TRAJECTORIES`** is combinable; **quantile-only or deterministic** output is **not** (SAP3's combination consumes MEMBERS and skips QUANTILES). No `CombinableModel` flag, no opt-out — eligibility rides on the representation.
+- The model owes only **per-model internal consistency**: all trajectory members share the same valid times, unit, and horizon (already guaranteed by `TrajectoryData` + `VariableMetadata`). **No cross-model stable member ids** — SAP3 remaps ids (POOLED offsets, BMA resamples).
+- **SAP3 owns the combination mechanism entirely:** cross-model compatibility checks (issue / valid times, unit, horizon must agree across models at a station), POOLED/BMA weighting, the `_pooled` / `_bma` sentinel models and `VIRTUAL` scope, and model selection (fallbacks excluded by priority ≥ 90). FI models are unaware they are combined.
+
+**Rationale:** keeps FI minimal; combination is orchestration, not a model-author concern. Confirms FI's existing "combinability derived from TRAJECTORIES" stance and the deliberate omission of `VIRTUAL` scope.
+
+**Reflected in:** `docs/input_requirement.md` (Targets), `docs/model_interface.md` (trajectories).
+
+## 1.13 `max_nan` enforcement — RESOLVED
+
+**Decision:** `max_nan` is the model's **declared per-variable tolerance**, and **SAP3 enforces it as a pre-`predict` gate** — the model is only ever called with inputs within tolerance (the `ModelInputs` bundle is valid-by-construction w.r.t. `max_nan`, per decision 1.9).
+
+- NaNs **exceed** `max_nan` → SAP3 does **not** call the model for that station; it records the failure directly: per-station `VariableStatus.FAILURE` with the `DATA_AVAILABILITY` signal if other stations are serviceable, else whole-run `ModelFailure` (decision 1.7 two-level rule).
+- NaNs **within** tolerance (≤ `max_nan`) → data delivered **as-is**; residual NaNs remain and the model handles them (impute/mask). `max_nan` gates the *unacceptable*; it does not promise zero NaNs.
+
+**Rationale:** keeps models defensive-check-free, puts the gate where the data lives (SAP3 — which today delivers raw NaNs, closing that gap), and reuses the existing failure vocabulary (no new types).
+
+**Reflected in:** `docs/input_requirement.md`.
+
+## 1.12 Time step: `timedelta`, not an enum — RESOLVED
+
+**Decision:** represent time step as **`timedelta`**, not the `TemporalResolution` enum. Driven by the v1 requirement for **3-hourly and 6-hourly** steps, which the coarse enum cannot express (`SUB_DAILY` cannot distinguish 3h from 6h — they would collide under one dict key).
+
+- **Input:** the `dynamic` dict is keyed by **`timedelta`** (e.g. `timedelta(hours=3/6/1/24)`). Identity match to SAP3's `time_step` / `supported_time_steps` (already `timedelta`) — this *reduces* divergence, since FI's `TemporalResolution` had no SAP3 counterpart.
+- **Output:** **drop the redundant `resolution` enum from `VariableMetadata`**; keep `timedelta` as the single source of truth (same two-sources-of-truth reasoning as dropping `name`, Q5).
+- **Retire `TemporalResolution`** from the v1 contract. **Calendar resolutions** (`MONTHLY` / `SEASONAL` / `ANNUAL`, decadal — genuinely not fixed durations) are **out of v1 scope**; if SAPPHIRE later needs pentadal/decadal/monthly forecasting, introduce a dedicated `TimeStep = timedelta | CalendarResolution` type then.
+
+**Deviation from Sandro:** the input hierarchy's level-1 "temporal resolution" is now keyed by `timedelta` rather than an enum — on the Sandro list — but forced by the 3h/6h requirement and more SAP3-consistent.
+
+*(Code TODO: change `InputRequirement.dynamic` key type to `timedelta`; remove `resolution` from `VariableMetadata`; remove `TemporalResolution` from `common/resolutions.py`; update validators and tests.)*
+
+**Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`.
+
+## 1.11 Parameter identity: vocabulary, units, aggregation — RESOLVED
+
+**Context:** SAP3 binds parameter name → unit → aggregation in one `ParameterDefinition`. FI had scattered this (free-string names, a closed disconnected `Unit` enum, no aggregation). Closed via three coordinated moves; all three are **sync contracts with SAP3** (keep aligned; update FI lists whenever a variable/unit is added on either side).
+
+**(a) Vocabulary — documented canonical names.** Variable names stay free strings but must match SAP3's canonical set (`discharge`, `water_level`, `water_temperature`, `precipitation`, `temperature`, `relative_humidity`, `wind_speed`, `wind_direction`, `global_radiation`, `reference_et`, `snow_water_equivalent`, `runoff`). SAP3 soft-checks at integration. A documented contract, **not** a hard FI enum (avoids tracking SAP3's evolving set).
+
+**(b) Aggregation — optional per-variable override.** Add optional `aggregation: AggregationMethod` (`SUM`/`MEAN`, mirroring SAP3) to `PastKnownVariable` / `FutureKnownVariable`, used when the declared resolution is coarser than delivered data. Default = per-parameter convention (precip/ref_et = SUM, rest = MEAN); declared only to override. Correctness-critical, hence expressible, but optional. *(Code TODO: add `AggregationMethod` enum + optional field.)*
+
+**(c) Units — first-class on inputs and outputs ("no data without units").**
+- Inputs: model **declares the expected `unit`** per input variable (`PastKnownVariable` / `FutureKnownVariable` gain `unit: Unit`); delivered `ModelInputs` series are **tagged with unit**; SAP3 **delivers in the declared unit or rejects loudly at integration** (auto-conversion deferred to a future adapter feature).
+- Outputs: unchanged — `TargetSpec` / `VariableMetadata` already declare units.
+- **`Unit` enum expansion:** add `PERCENT` (%), `M_PER_S` (m/s), `DEGREE`, `W_PER_M2` (W/m²), `MM_PER_HOUR`. *(Code TODO: expand `common/units.py`; add `unit` field to `input/variable.py`.)*
+
+**Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`, and code (`common/units.py`, `input/variable.py`).
+
 ## 1.10 Station identity & group support — RESOLVED (refined)
 
 **Station key type:** FI station keys are opaque `str` (not typed `StationId` / UUID) — FI stays dependency-free.
