@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from random import Random
 from typing import Any
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from forecast_interface.input import (
     DynamicInputSpec,
     InputRequirement,
+    ModelInputs,
     OutputRepresentation,
     PastKnownVariable,
     SpatialInputSpec,
@@ -17,6 +19,7 @@ from forecast_interface.input import (
 )
 from forecast_interface.interface import (
     ArtifactScope,
+    BatchHindcastModel,
     FailureCause,
     ForecastModel,
     ModelFailure,
@@ -235,24 +238,16 @@ class _ConformingModel:
     def input_requirement(self) -> InputRequirement:
         return _make_input_requirement()
 
-    def train(self, inputs: Any, *, config: Any, rng: Random) -> TrainedArtifact:
+    def train(
+        self, inputs: ModelInputs, *, config: Any, rng: Random
+    ) -> TrainedArtifact:
         return object()
 
     def predict(
         self,
         artifact: TrainedArtifact,
         *,
-        inputs: Any,
-        issue_datetime: datetime,
-        rng: Random,
-    ) -> ModelResult:
-        return ModelSuccess(output=_make_model_output())
-
-    def hindcast(
-        self,
-        artifact: TrainedArtifact,
-        *,
-        inputs: Any,
+        inputs: ModelInputs,
         issue_datetime: datetime,
         rng: Random,
     ) -> ModelResult:
@@ -265,11 +260,23 @@ class _ConformingModel:
         return object()
 
 
+class _BatchHindcastModel(_ConformingModel):
+    def hindcast(
+        self,
+        artifact: TrainedArtifact,
+        *,
+        inputs: ModelInputs,
+        issue_datetimes: Sequence[datetime],
+        rng: Random,
+    ) -> ModelResult:
+        return ModelSuccess(output=_make_model_output())
+
+
 class _RetrainableModel(_ConformingModel):
     def retrain(
         self,
         base_artifact: TrainedArtifact,
-        inputs: Any,
+        inputs: ModelInputs,
         *,
         config: Any,
         rng: Random,
@@ -293,16 +300,7 @@ class TestForecastModel:
                 self,
                 artifact: TrainedArtifact,
                 *,
-                inputs: Any,
-                issue_datetime: datetime,
-                rng: Random,
-            ) -> ModelResult: ...
-
-            def hindcast(
-                self,
-                artifact: TrainedArtifact,
-                *,
-                inputs: Any,
+                inputs: ModelInputs,
                 issue_datetime: datetime,
                 rng: Random,
             ) -> ModelResult: ...
@@ -322,23 +320,14 @@ class TestForecastModel:
                 return _make_input_requirement()
 
             def train(
-                self, inputs: Any, *, config: Any, rng: Random
+                self, inputs: ModelInputs, *, config: Any, rng: Random
             ) -> TrainedArtifact: ...
 
             def predict(
                 self,
                 artifact: TrainedArtifact,
                 *,
-                inputs: Any,
-                issue_datetime: datetime,
-                rng: Random,
-            ) -> ModelResult: ...
-
-            def hindcast(
-                self,
-                artifact: TrainedArtifact,
-                *,
-                inputs: Any,
+                inputs: ModelInputs,
                 issue_datetime: datetime,
                 rng: Random,
             ) -> ModelResult: ...
@@ -351,8 +340,15 @@ class TestForecastModel:
         model = _ConformingModel()
         assert isinstance(model, ForecastModel)
         assert not isinstance(model, RetrainableModel)
+        assert not isinstance(model, BatchHindcastModel)
 
     def test_model_with_retrain_satisfies_both(self) -> None:
         model = _RetrainableModel()
         assert isinstance(model, ForecastModel)
         assert isinstance(model, RetrainableModel)
+        assert not isinstance(model, BatchHindcastModel)
+
+    def test_batch_hindcast_model_satisfies_batch_protocol(self) -> None:
+        model = _BatchHindcastModel()
+        assert isinstance(model, BatchHindcastModel)
+        assert isinstance(model, ForecastModel)

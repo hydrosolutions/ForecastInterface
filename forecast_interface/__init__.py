@@ -1,4 +1,4 @@
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 from .common import AggregationMethod
 from .input import (
@@ -19,6 +19,7 @@ from .input import (
 )
 from .interface import (
     ArtifactScope,
+    BatchHindcastModel,
     FailureCause,
     ForecastModel,
     ModelFailure,
@@ -43,6 +44,7 @@ from .output import (
 __all__ = [
     "AggregationMethod",
     "ArtifactScope",
+    "BatchHindcastModel",
     "DeterministicData",
     "DynamicInputs",
     "DynamicInputSpec",

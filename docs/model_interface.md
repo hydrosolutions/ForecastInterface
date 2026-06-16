@@ -7,7 +7,7 @@ There are **three protocols**: the required `ForecastModel`, plus two optional e
 Core functionalities include:
 
 **Forecast Function** `predict()`
-Takes as input the `ModelInput` and a trained artifact, and outputs the `ModelOutput` (Forecast).
+Takes as input the `ModelInputs` and a trained artifact, and outputs the `ModelOutput` (Forecast).
 
 **Hindcast Function** `hindcast()` — *optional, strongly recommended*
 Lives on the optional `BatchHindcastModel` extension. Takes a trained artifact and a **batch** of issue datetimes, and outputs the `ModelOutput` (Hindcast) for all of them in one call. Functionally equivalent to looping `predict()` over historical issue times, but vectorized for efficiency. SAP3 uses the batch path whenever the model implements it and falls back to looping `predict()` otherwise — because SAP3 runs hindcasts routinely (skill evaluation), implementing it is strongly recommended.
@@ -19,7 +19,7 @@ Produce a `TrainedArtifact` from training inputs. See the Training & Lifecycle P
 
 ## Training & Lifecycle Protocol
 
-> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` and `config` parameters remain **provisional** — typed `Any` until the assembled-input bundle and model-config types are co-designed with SAP3 (doc 014 Task 3, the SAP3→FI input-types PR). Rich `TrainedArtifact` provenance metadata and the group-artifact embedding-key / station-set-mismatch contract are **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4 and §8).
+> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata and the group-artifact embedding-key / station-set-mismatch contract are **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4 and §8).
 
 ### Scope: `ArtifactScope`
 
@@ -48,7 +48,7 @@ A "national-group" model is a `GROUP` (it is just a group whose station set happ
 | `deserialize_artifact` | `deserialize_artifact(raw: bytes) -> TrainedArtifact` | `ForecastModel` | Inverse of `serialize_artifact`. |
 | `retrain` | `retrain(base_artifact, inputs, *, config, rng) -> TrainedArtifact` | `RetrainableModel` | **Optional.** Warm-start from an existing artifact, for models capable of it. Models that cannot warm-start simply do not implement it; callers fall back to `train`. |
 
-The `inputs` and `config` parameters are typed `Any` (provisional, see status note above).
+The `inputs` parameters use `ModelInputs`; only `config` is typed `Any` (provisional, see status note above).
 
 ### Determinism (dependency injection)
 
