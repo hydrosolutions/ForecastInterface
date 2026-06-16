@@ -36,11 +36,9 @@ VariableOutput
     flags: frozenset[ForecastFlag]
 
 VariableMetadata
-    name: str
     unit: Unit                             # e.g. Unit.M3_PER_S → "m³/s"
-    resolution: TemporalResolution                 # e.g. TemporalResolution.DAILY
     timedelta: timedelta                   # time step between forecast points
-    forecast_horizon: int                  # number of forecast steps (> 0)
+    forecast_horizon: int                  # forecast steps per issue_datetime block (> 0)
     offset: int                            # offset in steps (>= 0)
 
 DeterministicData
@@ -51,7 +49,7 @@ QuantileData
     data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "0.1", "0.5", "0.9"]
 
 TrajectoryData
-    num_samples: int                       # number of ensemble members (> 0)
+    num_samples: int                       # number of ensemble members (>= 8)
     data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "1", "2", ..., "N"]
 
 EpistemicUncertaintyData
@@ -71,9 +69,9 @@ All DataFrames are validated on construction:
 
 ### Enums
 
-**Unit** -- `M3_PER_S`, `MM_PER_DAY`, `MM_PER_S`, `MM`, `CM`, `M`, `DEG_C`, `UNITLESS`
+**Unit** -- `M3_PER_S`, `MM_PER_DAY`, `MM_PER_S`, `MM`, `CM`, `M`, `DEG_C`, `UNITLESS`, `PERCENT`, `M_PER_S`, `DEGREE`, `W_PER_M2`, `MM_PER_HOUR`
 
-**TemporalResolution** -- `SUB_HOURLY`, `HOURLY`, `SUB_DAILY`, `DAILY`, `WEEKLY`, `MONTHLY`, `SEASONAL`, `ANNUAL`
+**AggregationMethod** -- `SUM`, `MEAN`
 
 **VariableStatus** -- `SUCCESS`, `FAILURE`, `PARTIAL`
 
@@ -86,7 +84,7 @@ from datetime import datetime, timedelta
 import polars as pl
 from forecast_interface import (
     ModelOutput, VariableOutput, VariableMetadata,
-    DeterministicData, QuantileData, Unit, TemporalResolution, VariableStatus,
+    DeterministicData, QuantileData, Unit, VariableStatus,
 )
 
 issue_dt = datetime(2024, 6, 1, 6, 0)
@@ -97,11 +95,9 @@ output = ModelOutput(
         "station_1": {
             "streamflow": VariableOutput(
                 metadata=VariableMetadata(
-                    name="streamflow",
                     unit=Unit.M3_PER_S,
-                    resolution=TemporalResolution.DAILY,
                     timedelta=timedelta(days=1),
-                    forecast_horizon=10,
+                    forecast_horizon=2,
                     offset=0,
                 ),
                 deterministic=DeterministicData(
@@ -131,7 +127,7 @@ See [Input Requirement Specification](docs/input_requirement.md) for full docume
 ```
 InputRequirement
     targets: dict[str, TargetSpec]                  # what the model forecasts
-    dynamic: dict[TemporalResolution, SpatialInputSpec]
+    dynamic: dict[timedelta, SpatialInputSpec]
     static: set[str]
 
 TargetSpec
@@ -148,10 +144,14 @@ DynamicInputSpec
 PastKnownVariable
     lookback: int
     max_nan: int
+    unit: Unit
+    aggregation: AggregationMethod | None
 
 FutureKnownVariable
     future_steps: int
     max_nan: int
+    unit: Unit
+    aggregation: AggregationMethod | None
     ensemble_mode: EnsembleMode    # SINGLE or ENSEMBLE
 ```
 
@@ -160,3 +160,5 @@ FutureKnownVariable
 **SpatialRepresentation** -- `POINT`, `BASIN_AVERAGE`, `ELEVATION_BAND`, `GRIDDED`
 
 **OutputRepresentation** -- `DETERMINISTIC`, `QUANTILES`, `TRAJECTORIES`
+
+**AggregationMethod** -- `SUM`, `MEAN`

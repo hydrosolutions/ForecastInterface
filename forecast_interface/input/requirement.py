@@ -1,9 +1,8 @@
+import datetime
+
 from pydantic import BaseModel, field_validator, model_validator
 
-from forecast_interface.common.resolutions import (
-    SpatialRepresentation,
-    TemporalResolution,
-)
+from forecast_interface.common.resolutions import SpatialRepresentation
 
 from .target import TargetSpec
 from .variable import FutureKnownVariable, PastKnownVariable
@@ -40,7 +39,7 @@ class InputRequirement(BaseModel):
     # Targets are declared independently of inputs; a model needing the target's own
     # history lists it under past_known (see Q2 in open_design_questions.md).
     targets: dict[str, TargetSpec]
-    dynamic: dict[TemporalResolution, SpatialInputSpec]
+    dynamic: dict[datetime.timedelta, SpatialInputSpec]
     static: set[str] = set()
 
     @field_validator("targets")
@@ -58,12 +57,15 @@ class InputRequirement(BaseModel):
 
     @field_validator("dynamic")
     @classmethod
-    def _at_least_one_resolution(
+    def _validate_dynamic_time_steps(
         cls,
-        v: dict[TemporalResolution, SpatialInputSpec],
-    ) -> dict[TemporalResolution, SpatialInputSpec]:
+        v: dict[datetime.timedelta, SpatialInputSpec],
+    ) -> dict[datetime.timedelta, SpatialInputSpec]:
         if not v:
-            raise ValueError("dynamic must contain at least one temporal resolution")
+            raise ValueError("dynamic must contain at least one time step")
+        for time_step in v:
+            if time_step.total_seconds() <= 0:
+                raise ValueError("dynamic time step keys must be positive")
         return v
 
     @field_validator("static")

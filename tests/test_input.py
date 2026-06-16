@@ -1,8 +1,11 @@
+from datetime import timedelta
+
 import pytest
 from pydantic import ValidationError
 
 from forecast_interface.common import Unit
 from forecast_interface.input import (
+    AggregationMethod,
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
@@ -12,8 +15,10 @@ from forecast_interface.input import (
     SpatialInputSpec,
     SpatialRepresentation,
     TargetSpec,
-    TemporalResolution,
 )
+
+DAILY = timedelta(days=1)
+HOURLY = timedelta(hours=1)
 
 
 def _target() -> dict[str, TargetSpec]:
@@ -32,50 +37,83 @@ def _target() -> dict[str, TargetSpec]:
 
 class TestPastKnownVariable:
     def test_valid(self) -> None:
-        v = PastKnownVariable(lookback=30, max_nan=5)
+        v = PastKnownVariable(unit=Unit.M3_PER_S, lookback=30, max_nan=5)
         assert v.lookback == 30
         assert v.max_nan == 5
+        assert v.unit == Unit.M3_PER_S
+        assert v.aggregation is None
+
+    def test_aggregation_override(self) -> None:
+        v = PastKnownVariable(
+            unit=Unit.MM_PER_DAY,
+            lookback=30,
+            max_nan=5,
+            aggregation=AggregationMethod.SUM,
+        )
+        assert v.aggregation == AggregationMethod.SUM
+
+    def test_unit_required(self) -> None:
+        with pytest.raises(ValidationError, match="unit"):
+            PastKnownVariable(lookback=1, max_nan=0)
 
     def test_lookback_zero(self) -> None:
         with pytest.raises(ValidationError, match="lookback must be positive"):
-            PastKnownVariable(lookback=0, max_nan=0)
+            PastKnownVariable(unit=Unit.M3_PER_S, lookback=0, max_nan=0)
 
     def test_lookback_negative(self) -> None:
         with pytest.raises(ValidationError, match="lookback must be positive"):
-            PastKnownVariable(lookback=-1, max_nan=0)
+            PastKnownVariable(unit=Unit.M3_PER_S, lookback=-1, max_nan=0)
 
     def test_max_nan_negative(self) -> None:
         with pytest.raises(ValidationError, match="max_nan must be non-negative"):
-            PastKnownVariable(lookback=1, max_nan=-1)
+            PastKnownVariable(unit=Unit.M3_PER_S, lookback=1, max_nan=-1)
 
     def test_max_nan_zero_allowed(self) -> None:
-        v = PastKnownVariable(lookback=1, max_nan=0)
+        v = PastKnownVariable(unit=Unit.M3_PER_S, lookback=1, max_nan=0)
         assert v.max_nan == 0
 
 
 class TestFutureKnownVariable:
     def test_valid(self) -> None:
         v = FutureKnownVariable(
-            future_steps=10, max_nan=0, ensemble_mode=EnsembleMode.ENSEMBLE
+            unit=Unit.M3_PER_S,
+            future_steps=10,
+            max_nan=0,
+            ensemble_mode=EnsembleMode.ENSEMBLE,
         )
         assert v.future_steps == 10
         assert v.ensemble_mode == EnsembleMode.ENSEMBLE
+        assert v.unit == Unit.M3_PER_S
+        assert v.aggregation is None
+
+    def test_aggregation_override(self) -> None:
+        v = FutureKnownVariable(
+            unit=Unit.MM_PER_DAY,
+            future_steps=10,
+            max_nan=0,
+            aggregation=AggregationMethod.MEAN,
+        )
+        assert v.aggregation == AggregationMethod.MEAN
+
+    def test_unit_required(self) -> None:
+        with pytest.raises(ValidationError, match="unit"):
+            FutureKnownVariable(future_steps=1, max_nan=0)
 
     def test_ensemble_mode_default_single(self) -> None:
-        v = FutureKnownVariable(future_steps=5, max_nan=0)
+        v = FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=5, max_nan=0)
         assert v.ensemble_mode == EnsembleMode.SINGLE
 
     def test_future_steps_zero(self) -> None:
         with pytest.raises(ValidationError, match="future_steps must be positive"):
-            FutureKnownVariable(future_steps=0, max_nan=0)
+            FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=0, max_nan=0)
 
     def test_future_steps_negative(self) -> None:
         with pytest.raises(ValidationError, match="future_steps must be positive"):
-            FutureKnownVariable(future_steps=-3, max_nan=0)
+            FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=-3, max_nan=0)
 
     def test_max_nan_negative(self) -> None:
         with pytest.raises(ValidationError, match="max_nan must be non-negative"):
-            FutureKnownVariable(future_steps=1, max_nan=-1)
+            FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=1, max_nan=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +158,13 @@ class TestTargetSpec:
 class TestDynamicInputSpec:
     def test_past_only(self) -> None:
         spec = DynamicInputSpec(
-            past_known={"obs": {"discharge": PastKnownVariable(lookback=30, max_nan=2)}}
+            past_known={
+                "obs": {
+                    "discharge": PastKnownVariable(
+                        unit=Unit.M3_PER_S, lookback=30, max_nan=2
+                    )
+                }
+            }
         )
         assert "obs" in spec.past_known
         assert spec.future_known == {}
@@ -128,7 +172,11 @@ class TestDynamicInputSpec:
     def test_future_only(self) -> None:
         spec = DynamicInputSpec(
             future_known={
-                "GFS": {"precip": FutureKnownVariable(future_steps=10, max_nan=0)}
+                "GFS": {
+                    "precip": FutureKnownVariable(
+                        unit=Unit.M3_PER_S, future_steps=10, max_nan=0
+                    )
+                }
             }
         )
         assert "GFS" in spec.future_known
@@ -144,7 +192,11 @@ class TestDynamicInputSpec:
 class TestSpatialInputSpec:
     def test_basin_average_only(self) -> None:
         dynamic = DynamicInputSpec(
-            past_known={"obs": {"q": PastKnownVariable(lookback=10, max_nan=0)}}
+            past_known={
+                "obs": {
+                    "q": PastKnownVariable(unit=Unit.M3_PER_S, lookback=10, max_nan=0)
+                }
+            }
         )
         spec = SpatialInputSpec(data={SpatialRepresentation.BASIN_AVERAGE: dynamic})
         assert SpatialRepresentation.BASIN_AVERAGE in spec.data
@@ -152,7 +204,11 @@ class TestSpatialInputSpec:
 
     def test_gridded_only(self) -> None:
         dynamic = DynamicInputSpec(
-            past_known={"ERA5": {"swe": PastKnownVariable(lookback=90, max_nan=5)}}
+            past_known={
+                "ERA5": {
+                    "swe": PastKnownVariable(unit=Unit.M3_PER_S, lookback=90, max_nan=5)
+                }
+            }
         )
         spec = SpatialInputSpec(data={SpatialRepresentation.GRIDDED: dynamic})
         assert SpatialRepresentation.GRIDDED in spec.data
@@ -161,7 +217,9 @@ class TestSpatialInputSpec:
     def test_elevation_band(self) -> None:
         dynamic = DynamicInputSpec(
             past_known={
-                "SnowMapper": {"swe": PastKnownVariable(lookback=30, max_nan=2)}
+                "SnowMapper": {
+                    "swe": PastKnownVariable(unit=Unit.M3_PER_S, lookback=30, max_nan=2)
+                }
             }
         )
         spec = SpatialInputSpec(data={SpatialRepresentation.ELEVATION_BAND: dynamic})
@@ -169,10 +227,18 @@ class TestSpatialInputSpec:
 
     def test_both(self) -> None:
         basin = DynamicInputSpec(
-            past_known={"obs": {"q": PastKnownVariable(lookback=10, max_nan=0)}}
+            past_known={
+                "obs": {
+                    "q": PastKnownVariable(unit=Unit.M3_PER_S, lookback=10, max_nan=0)
+                }
+            }
         )
         gridded = DynamicInputSpec(
-            past_known={"ERA5": {"swe": PastKnownVariable(lookback=90, max_nan=5)}}
+            past_known={
+                "ERA5": {
+                    "swe": PastKnownVariable(unit=Unit.M3_PER_S, lookback=90, max_nan=5)
+                }
+            }
         )
         spec = SpatialInputSpec(
             data={
@@ -210,13 +276,13 @@ class TestInputRequirement:
         req = InputRequirement(
             targets=_target(),
             dynamic={
-                TemporalResolution.DAILY: SpatialInputSpec(
+                DAILY: SpatialInputSpec(
                     data={
                         SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                             past_known={
                                 "obs": {
                                     "discharge": PastKnownVariable(
-                                        lookback=365, max_nan=10
+                                        unit=Unit.M3_PER_S, lookback=365, max_nan=10
                                     )
                                 }
                             }
@@ -225,7 +291,7 @@ class TestInputRequirement:
                 )
             },
         )
-        assert TemporalResolution.DAILY in req.dynamic
+        assert DAILY in req.dynamic
         assert req.static == set()
         assert "discharge" in req.targets
 
@@ -233,11 +299,15 @@ class TestInputRequirement:
         req = InputRequirement(
             targets=_target(),
             dynamic={
-                TemporalResolution.DAILY: SpatialInputSpec(
+                DAILY: SpatialInputSpec(
                     data={
                         SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                             past_known={
-                                "obs": {"q": PastKnownVariable(lookback=30, max_nan=0)}
+                                "obs": {
+                                    "q": PastKnownVariable(
+                                        unit=Unit.M3_PER_S, lookback=30, max_nan=0
+                                    )
+                                }
                             }
                         )
                     }
@@ -252,12 +322,14 @@ class TestInputRequirement:
             InputRequirement(
                 targets={},
                 dynamic={
-                    TemporalResolution.DAILY: SpatialInputSpec(
+                    DAILY: SpatialInputSpec(
                         data={
                             SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                                 past_known={
                                     "obs": {
-                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                        )
                                     }
                                 }
                             )
@@ -278,12 +350,14 @@ class TestInputRequirement:
                     )
                 },
                 dynamic={
-                    TemporalResolution.DAILY: SpatialInputSpec(
+                    DAILY: SpatialInputSpec(
                         data={
                             SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                                 past_known={
                                     "obs": {
-                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                        )
                                     }
                                 }
                             )
@@ -293,20 +367,70 @@ class TestInputRequirement:
             )
 
     def test_empty_dynamic_raises(self) -> None:
-        with pytest.raises(ValidationError, match="at least one temporal resolution"):
+        with pytest.raises(
+            ValidationError, match="dynamic must contain at least one time step"
+        ):
             InputRequirement(targets=_target(), dynamic={})
+
+    def test_zero_dynamic_time_step_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="time step keys must be positive"):
+            InputRequirement(
+                targets=_target(),
+                dynamic={
+                    timedelta(0): SpatialInputSpec(
+                        data={
+                            SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
+                                past_known={
+                                    "obs": {
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S,
+                                            lookback=1,
+                                            max_nan=0,
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    )
+                },
+            )
+
+    def test_negative_dynamic_time_step_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="time step keys must be positive"):
+            InputRequirement(
+                targets=_target(),
+                dynamic={
+                    timedelta(days=-1): SpatialInputSpec(
+                        data={
+                            SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
+                                past_known={
+                                    "obs": {
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S,
+                                            lookback=1,
+                                            max_nan=0,
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    )
+                },
+            )
 
     def test_empty_static_string_raises(self) -> None:
         with pytest.raises(ValidationError, match="non-empty strings"):
             InputRequirement(
                 targets=_target(),
                 dynamic={
-                    TemporalResolution.DAILY: SpatialInputSpec(
+                    DAILY: SpatialInputSpec(
                         data={
                             SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                                 past_known={
                                     "obs": {
-                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                        )
                                     }
                                 }
                             )
@@ -320,11 +444,15 @@ class TestInputRequirement:
         req = InputRequirement(
             targets=_target(),
             dynamic={
-                TemporalResolution.DAILY: SpatialInputSpec(
+                DAILY: SpatialInputSpec(
                     data={
                         SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                             past_known={
-                                "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
+                                "obs": {
+                                    "q": PastKnownVariable(
+                                        unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                    )
+                                }
                             }
                         )
                     }
@@ -343,12 +471,14 @@ class TestInputRequirement:
             InputRequirement(
                 targets=_target(),
                 dynamic={
-                    TemporalResolution.DAILY: SpatialInputSpec(
+                    DAILY: SpatialInputSpec(
                         data={
                             SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                                 past_known={
                                     "obs": {
-                                        "q": PastKnownVariable(lookback=1, max_nan=0)
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                        )
                                     }
                                 }
                             )
@@ -382,27 +512,29 @@ class TestFullYamlExample:
                 )
             },
             dynamic={
-                TemporalResolution.DAILY: SpatialInputSpec(
+                DAILY: SpatialInputSpec(
                     data={
                         SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                             past_known={
                                 "obs": {
                                     "discharge": PastKnownVariable(
-                                        lookback=365, max_nan=10
+                                        unit=Unit.M3_PER_S, lookback=365, max_nan=10
                                     ),
                                     "precipitation": PastKnownVariable(
-                                        lookback=30, max_nan=5
+                                        unit=Unit.M3_PER_S, lookback=30, max_nan=5
                                     ),
                                 }
                             },
                             future_known={
                                 "GFS": {
                                     "precipitation": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=10,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.ENSEMBLE,
                                     ),
                                     "temperature": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=10,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.SINGLE,
@@ -410,6 +542,7 @@ class TestFullYamlExample:
                                 },
                                 "ECMWF": {
                                     "precipitation": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=15,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.ENSEMBLE,
@@ -420,9 +553,11 @@ class TestFullYamlExample:
                         SpatialRepresentation.GRIDDED: DynamicInputSpec(
                             past_known={
                                 "ERA5": {
-                                    "swe": PastKnownVariable(lookback=90, max_nan=5),
+                                    "swe": PastKnownVariable(
+                                        unit=Unit.M3_PER_S, lookback=90, max_nan=5
+                                    ),
                                     "precipitation": PastKnownVariable(
-                                        lookback=30, max_nan=3
+                                        unit=Unit.M3_PER_S, lookback=30, max_nan=3
                                     ),
                                 }
                             }
@@ -431,11 +566,13 @@ class TestFullYamlExample:
                             future_known={
                                 "SnowMapper": {
                                     "swe": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=10,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.SINGLE,
                                     ),
                                     "rof": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=10,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.SINGLE,
@@ -445,19 +582,20 @@ class TestFullYamlExample:
                         ),
                     }
                 ),
-                TemporalResolution.HOURLY: SpatialInputSpec(
+                HOURLY: SpatialInputSpec(
                     data={
                         SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                             past_known={
                                 "obs": {
                                     "discharge": PastKnownVariable(
-                                        lookback=72, max_nan=2
+                                        unit=Unit.M3_PER_S, lookback=72, max_nan=2
                                     ),
                                 }
                             },
                             future_known={
                                 "INCA": {
                                     "precipitation": FutureKnownVariable(
+                                        unit=Unit.M3_PER_S,
                                         future_steps=48,
                                         max_nan=0,
                                         ensemble_mode=EnsembleMode.SINGLE,
@@ -473,8 +611,8 @@ class TestFullYamlExample:
 
     def test_construction(self, full_requirement: InputRequirement) -> None:
         assert len(full_requirement.dynamic) == 2
-        assert TemporalResolution.DAILY in full_requirement.dynamic
-        assert TemporalResolution.HOURLY in full_requirement.dynamic
+        assert DAILY in full_requirement.dynamic
+        assert HOURLY in full_requirement.dynamic
         assert len(full_requirement.static) == 3
 
     def test_targets(self, full_requirement: InputRequirement) -> None:
@@ -483,7 +621,7 @@ class TestFullYamlExample:
         assert OutputRepresentation.TRAJECTORIES in discharge.representations
 
     def test_daily_basin_average_past(self, full_requirement: InputRequirement) -> None:
-        daily = full_requirement.dynamic[TemporalResolution.DAILY]
+        daily = full_requirement.dynamic[DAILY]
         basin = daily.data[SpatialRepresentation.BASIN_AVERAGE]
         obs = basin.past_known["obs"]
         assert obs["discharge"].lookback == 365
@@ -492,7 +630,7 @@ class TestFullYamlExample:
     def test_daily_basin_average_future(
         self, full_requirement: InputRequirement
     ) -> None:
-        daily = full_requirement.dynamic[TemporalResolution.DAILY]
+        daily = full_requirement.dynamic[DAILY]
         basin = daily.data[SpatialRepresentation.BASIN_AVERAGE]
         gfs = basin.future_known["GFS"]
         assert gfs["precipitation"].ensemble_mode == EnsembleMode.ENSEMBLE
@@ -501,20 +639,20 @@ class TestFullYamlExample:
         assert ecmwf["precipitation"].future_steps == 15
 
     def test_daily_gridded_past(self, full_requirement: InputRequirement) -> None:
-        daily = full_requirement.dynamic[TemporalResolution.DAILY]
+        daily = full_requirement.dynamic[DAILY]
         gridded = daily.data[SpatialRepresentation.GRIDDED]
         era5 = gridded.past_known["ERA5"]
         assert era5["swe"].lookback == 90
 
     def test_daily_elevation_band(self, full_requirement: InputRequirement) -> None:
-        daily = full_requirement.dynamic[TemporalResolution.DAILY]
+        daily = full_requirement.dynamic[DAILY]
         band = daily.data[SpatialRepresentation.ELEVATION_BAND]
         snow = band.future_known["SnowMapper"]
         assert "swe" in snow
         assert "rof" in snow
 
     def test_hourly_block(self, full_requirement: InputRequirement) -> None:
-        hourly = full_requirement.dynamic[TemporalResolution.HOURLY]
+        hourly = full_requirement.dynamic[HOURLY]
         assert SpatialRepresentation.BASIN_AVERAGE in hourly.data
         assert SpatialRepresentation.GRIDDED not in hourly.data
         basin = hourly.data[SpatialRepresentation.BASIN_AVERAGE]

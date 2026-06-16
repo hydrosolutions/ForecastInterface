@@ -175,6 +175,7 @@ At least one of `deterministic`, `quantiles`, or `trajectories` must be present 
 ### Metadata semantics
 
 - **`forecast_horizon`** — number of forecast steps; **consumed directly by the SAP3 adapter** (`ForecastEnsemble.forecast_horizon_steps`). A cross-validator enforces it against the data: for `predict`, `forecast_horizon` equals the row count; for batch `hindcast` it equals the rows **per `issue_datetime`** (one block per issue time).
+- `forecast_horizon` equals the actual forecast steps present per issue block, so a `PARTIAL` / short forecast declares a smaller `forecast_horizon` and still satisfies the validator.
 - **`offset`** — number of steps (each `timedelta` long) between the **last observation and the first forecast step**. `offset = 1` ⇒ the first forecast valid time is `last_obs + 1·timedelta` (the usual next-step case); `offset = 2` ⇒ a one-step gap.
 - **No `name`** — the variable name is the `ModelOutput.variables[station][variable]` dict key; duplicating it in metadata is omitted to avoid two disagreeing sources of truth.
 - **`timedelta` is the single time-step source** — there is no `resolution` enum (it would be a second, disagreeable source of truth). The time step is a precise `timedelta`, matching the `timedelta`-keyed input requirement (decision 1.12).

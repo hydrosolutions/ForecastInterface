@@ -4,13 +4,13 @@ from datetime import timedelta
 import polars as pl
 import pytest
 
+from forecast_interface.common import AggregationMethod
 from forecast_interface.output import (
     DeterministicData,
     EpistemicUncertaintyData,
     ForecastFlag,
     ModelOutput,
     QuantileData,
-    TemporalResolution,
     TrajectoryData,
     Unit,
     VariableMetadata,
@@ -25,11 +25,9 @@ _DT2 = datetime.datetime(2024, 1, 2)
 
 def _make_metadata(**overrides: object) -> VariableMetadata:
     defaults: dict[str, object] = {
-        "name": "discharge",
         "unit": Unit.M3_PER_S,
-        "resolution": TemporalResolution.DAILY,
         "timedelta": timedelta(days=1),
-        "forecast_horizon": 10,
+        "forecast_horizon": 2,
         "offset": 0,
     }
     defaults.update(overrides)
@@ -60,24 +58,23 @@ class TestUnit:
         assert Unit.M.value == "m"
         assert Unit.DEG_C.value == "°C"
         assert Unit.UNITLESS.value == "-"
+        assert Unit.PERCENT.value == "%"
+        assert Unit.M_PER_S.value == "m/s"
+        assert Unit.DEGREE.value == "°"
+        assert Unit.W_PER_M2.value == "W/m²"
+        assert Unit.MM_PER_HOUR.value == "mm/hour"
 
     def test_member_count(self) -> None:
-        assert len(Unit) == 8
+        assert len(Unit) == 13
 
 
-class TestTemporalResolution:
+class TestAggregationMethod:
     def test_members_exist(self) -> None:
-        assert TemporalResolution.SUB_HOURLY.value == "sub_hourly"
-        assert TemporalResolution.HOURLY.value == "hourly"
-        assert TemporalResolution.SUB_DAILY.value == "sub_daily"
-        assert TemporalResolution.DAILY.value == "daily"
-        assert TemporalResolution.WEEKLY.value == "weekly"
-        assert TemporalResolution.MONTHLY.value == "monthly"
-        assert TemporalResolution.SEASONAL.value == "seasonal"
-        assert TemporalResolution.ANNUAL.value == "annual"
+        assert AggregationMethod.SUM.value == "sum"
+        assert AggregationMethod.MEAN.value == "mean"
 
     def test_member_count(self) -> None:
-        assert len(TemporalResolution) == 8
+        assert len(AggregationMethod) == 2
 
 
 class TestVariableStatus:
@@ -93,20 +90,10 @@ class TestVariableStatus:
 class TestVariableMetadata:
     def test_valid_construction(self) -> None:
         meta = _make_metadata()
-        assert meta.name == "discharge"
         assert meta.unit == Unit.M3_PER_S
-        assert meta.resolution == TemporalResolution.DAILY
         assert meta.timedelta == timedelta(days=1)
-        assert meta.forecast_horizon == 10
+        assert meta.forecast_horizon == 2
         assert meta.offset == 0
-
-    def test_empty_name_rejected(self) -> None:
-        with pytest.raises(ValueError, match="name must be a non-empty string"):
-            _make_metadata(name="")
-
-    def test_whitespace_name_rejected(self) -> None:
-        with pytest.raises(ValueError, match="name must be a non-empty string"):
-            _make_metadata(name="   ")
 
     def test_zero_forecast_horizon_rejected(self) -> None:
         with pytest.raises(ValueError, match="forecast_horizon must be positive"):
@@ -328,8 +315,20 @@ class TestQuantileData:
                 "datetime": [_DT1],
             }
         )
-        with pytest.raises(ValueError, match="must not be empty"):
+        with pytest.raises(ValueError, match="must contain at least 3 levels"):
             QuantileData(quantile_levels=[], data=df)
+
+    def test_less_than_three_levels_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "0.1": [1.0],
+                "0.9": [3.0],
+            }
+        )
+        with pytest.raises(ValueError, match="must contain at least 3 levels"):
+            QuantileData(quantile_levels=[0.1, 0.9], data=df)
 
     def test_level_zero_rejected(self) -> None:
         df = pl.DataFrame(
@@ -337,21 +336,25 @@ class TestQuantileData:
                 "issue_datetime": [_ISSUE_DT],
                 "datetime": [_DT1],
                 "0.0": [1.0],
+                "0.5": [2.0],
+                "0.9": [3.0],
             }
         )
         with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
-            QuantileData(quantile_levels=[0.0], data=df)
+            QuantileData(quantile_levels=[0.0, 0.5, 0.9], data=df)
 
     def test_level_one_rejected(self) -> None:
         df = pl.DataFrame(
             {
                 "issue_datetime": [_ISSUE_DT],
                 "datetime": [_DT1],
+                "0.1": [1.0],
+                "0.5": [2.0],
                 "1.0": [1.0],
             }
         )
         with pytest.raises(ValueError, match="must be in \\(0, 1\\)"):
-            QuantileData(quantile_levels=[1.0], data=df)
+            QuantileData(quantile_levels=[0.1, 0.5, 1.0], data=df)
 
     def test_unsorted_levels_rejected(self) -> None:
         df = pl.DataFrame(
@@ -360,21 +363,23 @@ class TestQuantileData:
                 "datetime": [_DT1],
                 "0.9": [1.0],
                 "0.1": [2.0],
+                "0.5": [3.0],
             }
         )
         with pytest.raises(ValueError, match="must be sorted ascending"):
-            QuantileData(quantile_levels=[0.9, 0.1], data=df)
+            QuantileData(quantile_levels=[0.9, 0.1, 0.5], data=df)
 
     def test_duplicate_levels_rejected(self) -> None:
         df = pl.DataFrame(
             {
                 "issue_datetime": [_ISSUE_DT],
                 "datetime": [_DT1],
+                "0.1": [1.0],
                 "0.5": [1.0],
             }
         )
         with pytest.raises(ValueError, match="must not contain duplicates"):
-            QuantileData(quantile_levels=[0.5, 0.5], data=df)
+            QuantileData(quantile_levels=[0.1, 0.5, 0.5], data=df)
 
     def test_column_mismatch_rejected(self) -> None:
         df = pl.DataFrame(
@@ -393,11 +398,13 @@ class TestQuantileData:
             {
                 "issue_datetime": [_ISSUE_DT],
                 "datetime": [_DT1],
+                "0.1": [1.0],
                 "0.5": ["abc"],
+                "0.9": [3.0],
             }
         )
         with pytest.raises(ValueError, match="must be numeric"):
-            QuantileData(quantile_levels=[0.5], data=df)
+            QuantileData(quantile_levels=[0.1, 0.5, 0.9], data=df)
 
 
 class TestTrajectoryData:
@@ -409,11 +416,16 @@ class TestTrajectoryData:
                 "1": [10.0],
                 "2": [20.0],
                 "3": [30.0],
+                "4": [40.0],
+                "5": [50.0],
+                "6": [60.0],
+                "7": [70.0],
+                "8": [80.0],
             }
         )
-        td = TrajectoryData(num_samples=3, data=df)
-        assert td.num_samples == 3
-        assert td.data.shape == (1, 5)
+        td = TrajectoryData(num_samples=8, data=df)
+        assert td.num_samples == 8
+        assert td.data.shape == (1, 10)
 
     def test_zero_samples_rejected(self) -> None:
         df = pl.DataFrame(
@@ -422,7 +434,7 @@ class TestTrajectoryData:
                 "datetime": [_DT1],
             }
         )
-        with pytest.raises(ValueError, match="num_samples must be positive"):
+        with pytest.raises(ValueError, match="num_samples must be at least 8"):
             TrajectoryData(num_samples=0, data=df)
 
     def test_negative_samples_rejected(self) -> None:
@@ -432,8 +444,25 @@ class TestTrajectoryData:
                 "datetime": [_DT1],
             }
         )
-        with pytest.raises(ValueError, match="num_samples must be positive"):
+        with pytest.raises(ValueError, match="num_samples must be at least 8"):
             TrajectoryData(num_samples=-1, data=df)
+
+    def test_less_than_eight_samples_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "1": [10.0],
+                "2": [20.0],
+                "3": [30.0],
+                "4": [40.0],
+                "5": [50.0],
+                "6": [60.0],
+                "7": [70.0],
+            }
+        )
+        with pytest.raises(ValueError, match="num_samples must be at least 8"):
+            TrajectoryData(num_samples=7, data=df)
 
     def test_column_count_mismatch_rejected(self) -> None:
         df = pl.DataFrame(
@@ -445,7 +474,7 @@ class TestTrajectoryData:
             }
         )
         with pytest.raises(ValueError, match="Column mismatch"):
-            TrajectoryData(num_samples=3, data=df)
+            TrajectoryData(num_samples=8, data=df)
 
     def test_wrong_column_names_rejected(self) -> None:
         df = pl.DataFrame(
@@ -457,7 +486,7 @@ class TestTrajectoryData:
             }
         )
         with pytest.raises(ValueError, match="Column mismatch"):
-            TrajectoryData(num_samples=2, data=df)
+            TrajectoryData(num_samples=8, data=df)
 
 
 class TestVariableOutput:
@@ -483,7 +512,7 @@ class TestVariableOutput:
             }
         )
         vo = VariableOutput(
-            metadata=_make_metadata(),
+            metadata=_make_metadata(forecast_horizon=1),
             quantiles=QuantileData(quantile_levels=[0.1, 0.5, 0.9], data=df),
             status=VariableStatus.SUCCESS,
         )
@@ -497,11 +526,17 @@ class TestVariableOutput:
                 "datetime": [_DT1],
                 "1": [10.0],
                 "2": [20.0],
+                "3": [30.0],
+                "4": [40.0],
+                "5": [50.0],
+                "6": [60.0],
+                "7": [70.0],
+                "8": [80.0],
             }
         )
         vo = VariableOutput(
-            metadata=_make_metadata(),
-            trajectories=TrajectoryData(num_samples=2, data=df),
+            metadata=_make_metadata(forecast_horizon=1),
+            trajectories=TrajectoryData(num_samples=8, data=df),
             status=VariableStatus.SUCCESS,
         )
         assert vo.trajectories is not None
@@ -510,22 +545,31 @@ class TestVariableOutput:
     def test_valid_all_three(self) -> None:
         det = _make_deterministic()
         quant = QuantileData(
-            quantile_levels=[0.5],
+            quantile_levels=[0.1, 0.5, 0.9],
             data=pl.DataFrame(
                 {
-                    "issue_datetime": [_ISSUE_DT],
-                    "datetime": [_DT1],
-                    "0.5": [1.0],
+                    "issue_datetime": [_ISSUE_DT, _ISSUE_DT],
+                    "datetime": [_DT1, _DT2],
+                    "0.1": [1.0, 2.0],
+                    "0.5": [2.0, 3.0],
+                    "0.9": [3.0, 4.0],
                 }
             ),
         )
         traj = TrajectoryData(
-            num_samples=1,
+            num_samples=8,
             data=pl.DataFrame(
                 {
-                    "issue_datetime": [_ISSUE_DT],
-                    "datetime": [_DT1],
-                    "1": [1.0],
+                    "issue_datetime": [_ISSUE_DT, _ISSUE_DT],
+                    "datetime": [_DT1, _DT2],
+                    "1": [1.0, 2.0],
+                    "2": [2.0, 3.0],
+                    "3": [3.0, 4.0],
+                    "4": [4.0, 5.0],
+                    "5": [5.0, 6.0],
+                    "6": [6.0, 7.0],
+                    "7": [7.0, 8.0],
+                    "8": [8.0, 9.0],
                 }
             ),
         )
@@ -568,6 +612,80 @@ class TestVariableOutput:
             status=VariableStatus.PARTIAL,
         )
         assert vo.status == VariableStatus.PARTIAL
+
+    def test_partial_short_forecast_declares_smaller_horizon(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "value": [1.0],
+            }
+        )
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=1),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.PARTIAL,
+        )
+        assert vo.metadata.forecast_horizon == 1
+
+    def test_horizon_validator_passes_single_issue(self) -> None:
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=2),
+            deterministic=_make_deterministic(),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_horizon_validator_passes_batch_hindcast(self) -> None:
+        issue_2 = datetime.datetime(2024, 1, 2, 6, 0)
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT, _ISSUE_DT, issue_2, issue_2],
+                "datetime": [
+                    _DT1,
+                    _DT2,
+                    datetime.datetime(2024, 1, 3),
+                    datetime.datetime(2024, 1, 4),
+                ],
+                "value": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=2),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_horizon_validator_rejects_mismatched_group_count(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT],
+                "datetime": [_DT1],
+                "value": [1.0],
+            }
+        )
+        with pytest.raises(ValueError, match="rows per issue_datetime.*got 1"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.FAILURE,
+            )
+
+    def test_horizon_validator_rejects_empty_present_representation(self) -> None:
+        df = pl.DataFrame(
+            schema={
+                "issue_datetime": pl.Datetime,
+                "datetime": pl.Datetime,
+                "value": pl.Float64,
+            }
+        )
+        with pytest.raises(ValueError, match="deterministic data must not be empty"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=1),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.FAILURE,
+            )
 
     def test_epistemic_uncertainty_accepted(self) -> None:
         vo = VariableOutput(

@@ -87,7 +87,7 @@ divergence table (lines 138–151) on the FI side.
 |---|---|---|
 | `ModelOutput` (`output/model_output.py:9`) | `tuple[dict[str, ForecastEnsemble], bytes \| None]` (`protocols/forecast_model.py:38`) | Convert whole container → forecast dict + state bytes. |
 | `VariableOutput.deterministic` / `.quantiles` / `.trajectories` (`output/variable_output.py:109–111`) | `ForecastEnsemble` (`types/ensemble.py:18`) | Pick whichever is populated; route to the matching factory. |
-| `TrajectoryData` (`output/variable_output.py:64`) | `ForecastEnsemble.from_members()` (`types/ensemble.py:39`) → `MEMBERS` | Reshape member columns → `member_id`/`value`; ≥1 member (SAP3 line 60–62). |
+| `TrajectoryData` (`output/variable_output.py:64`) | `ForecastEnsemble.from_members()` (`types/ensemble.py:39`) → `MEMBERS` | Reshape member columns → `member_id`/`value`; FI enforces ≥8 members. |
 | `QuantileData` (`output/variable_output.py:33`) | `ForecastEnsemble.from_quantiles()` (`types/ensemble.py:76`) → `QUANTILES` | Reshape quantile columns → `quantile`/`value`. **See operational gap below.** |
 | `DeterministicData` (`output/variable_output.py:20`) | single-member `MEMBERS` ensemble (`types/ensemble.py:39`) | Wrap the single `value` column as `member_id=1`; flagged `insufficient_ensemble_size`, skips operational alert thresholds (doc 014 lines 190–196). |
 | `EpistemicUncertaintyData` (`output/variable_output.py:90`) | — (no SAP3 target) | **Dropped at the boundary in v0b** (FI-only; doc 014 lines 197–204). Revisit if models emit it. |
@@ -96,10 +96,9 @@ divergence table (lines 138–151) on the FI side.
 | `VariableMetadata.unit: Unit` (`output/metadata.py:11`; enum `common/units.py:4`) | `ForecastEnsemble.units: str` (`types/ensemble.py:24`) | Map `Unit` enum → SAP3 canonical unit string (table below). |
 | `ModelOutput.issue_datetime` (`output/model_output.py:13`) | `ForecastEnsemble.issued_at: UtcDatetime` (`types/ensemble.py:22`) | Apply `ensure_utc()`. |
 | per-row `datetime` column (all FI data containers) | `valid_time` column (SAP3 factories require it: `types/ensemble.py:54,91`) | Rename `datetime` → `valid_time`. |
-| `VariableMetadata.forecast_horizon: int` (`output/metadata.py:14`) | `ForecastEnsemble.forecast_horizon_steps: int` (`types/ensemble.py:25`) | **DIRECT** — both int, both step counts. **`forecast_horizon` IS consumed by the adapter** (corrects any prior "never consumed" belief). See note below. |
-| `VariableMetadata.timedelta: timedelta` (`output/metadata.py:13`) | `ForecastEnsemble.time_step: timedelta` (`types/ensemble.py:23`) | **DIRECT** assignment. |
-| `VariableMetadata.resolution: TemporalResolution` (`output/metadata.py:12`; enum `common/resolutions.py:4`) | — (no direct target) | Categorical label only; **cross-validate** against `timedelta`, never the conversion source. |
-| `ModelOutput.variables` inner key / `VariableMetadata.name` (`output/model_output.py`, `output/metadata.py:10`) | `ForecastEnsemble.parameter: str` (`types/ensemble.py:23`) | Validate against `ForecastParameter = Literal["discharge","water_level"]` and `ModelDataRequirements.target_parameters` (`types/model.py:261`). |
+| `VariableMetadata.forecast_horizon: int` (`output/metadata.py:11`) | `ForecastEnsemble.forecast_horizon_steps: int` (`types/ensemble.py:25`) | **DIRECT** — both int, both step counts. **`forecast_horizon` IS consumed by the adapter** (corrects any prior "never consumed" belief). See note below. |
+| `VariableMetadata.timedelta: timedelta` (`output/metadata.py:10`) | `ForecastEnsemble.time_step: timedelta` (`types/ensemble.py:23`) | **DIRECT** assignment; the adapter derives the time step from this field. |
+| `ModelOutput.variables` inner key (`output/model_output.py`) | `ForecastEnsemble.parameter: str` (`types/ensemble.py:23`) | Variable name is the dict key; `VariableMetadata.name` was removed. Validate against `ForecastParameter = Literal["discharge","water_level"]` and `ModelDataRequirements.target_parameters` (`types/model.py:261`). |
 | `ModelOutput.variables` outer key (`output/model_output.py`) | `StationId` (`types/ids.py`) | Station id (opaque `str` on FI side, Q1); adapter maps str → typed `StationId` per GROUP-path decomposition (§5). |
 | empty `ModelOutput.variables` **or** all-`FAILURE` | `ModelOutputError` (`exceptions.py:17`) | Adapter **raises** — zero usable ensembles (doc 014 lines 160–168, 218–223). |
 
@@ -143,11 +142,11 @@ ASCII canonical string from its `parameters` table (doc 014 line 147). The adapt
 
 ### `QuantileData` operational gap (FI valid ≠ SAP3 usable)
 
-FI's `QuantileData` requires only **≥1** quantile level in `(0,1)`, sorted & unique
+FI's `QuantileData` requires **≥3** quantile levels in `(0,1)`, sorted & unique
 (`output/variable_output.py:39–51`). SAP3's `from_quantiles()` requires **≥7** quantile
 levels **with tail coverage** (min ≤ 0.05 and max ≥ 0.95) (`types/ensemble.py:98–106`).
 
-Consequently an FI model emitting fewer than 7 quantiles (or without tail coverage) is
+Consequently an FI model emitting 3–6 quantiles (or without tail coverage) is
 **structurally valid FI output but NOT operationally usable by SAP3** — `from_quantiles()`
 raises `ValueError`. State this to model authors explicitly: FI's quantile floor is a
 permissive structural minimum; SAP3's operational floor is stricter.
@@ -193,7 +192,7 @@ discrepancy note at the end of this section.
 | `InputRequirement.static` (`input/requirement.py:37`) | `static_features: frozenset[str]` (line 264) |
 | `PastKnownVariable.lookback` (`input/variable.py:12`) | `lookback_steps: int` (line 266) |
 | `FutureKnownVariable.future_steps` (`input/variable.py:31`) | `forecast_horizon_steps: int` (line 267) |
-| `TemporalResolution` keys + `VariableMetadata.timedelta` | `supported_time_steps: frozenset[timedelta]` (line 265) |
+| `InputRequirement.dynamic` `timedelta` keys + `VariableMetadata.timedelta` | `supported_time_steps: frozenset[timedelta]` (line 265) |
 | `SpatialRepresentation` keys (`input/requirement.py`) | `spatial_input_type: SpatialRepresentation` (line 268) |
 | `InputRequirement.targets` keys + `TargetSpec.unit`/`.representations` (`input/target.py`) | `target_parameters: frozenset[str]` (line 261) |
 | `PastKnownVariable.max_nan` / `FutureKnownVariable.max_nan` (`input/variable.py:13,32`) | Derivable from SAP3 QC config (doc 014 line 273) |
@@ -323,5 +322,5 @@ FI/artifact side answers *"what is this model and how was it built"*; SAP3 side 
 | 5 | Epistemic uncertainty | `EpistemicUncertaintyData` is dropped at the boundary in v0b (doc 014 lines 197–204). Revisit (add to `ForecastEnsemble` / store as metadata) if models emit it. |
 | 6 | Interface module now exists | doc 014 assumes FI's `interface/` is unimplemented (lines 80, 287). It is now implemented (`ForecastModel`, `ModelResult`, `FailureCause`). SAP3 should re-evaluate Tasks 4–5 against the real protocol. |
 | 7 | `ModelResult` failure channel | FI now returns `ModelResult = ModelSuccess \| ModelFailure` (`interface/result.py:40`) with a `FailureCause` enum (`interface/failure.py:4`). SAP3's `ModelOutputError` path must account for the `ModelFailure` branch, not only all-`FAILURE` `ModelOutput`. |
-| 8 | Resolution enum split | FI split into `TemporalResolution` + `SpatialRepresentation` (`common/resolutions.py`); doc 014 references a single `Resolution`. Mapping tables above use the current split. |
+| 8 | Resolution enum split | FI now keeps `SpatialRepresentation` (`common/resolutions.py`) and uses `timedelta` for time steps; doc 014 references a single `Resolution`. Mapping tables above use the current FI shape. |
 ```

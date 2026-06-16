@@ -14,7 +14,6 @@ from forecast_interface.input import (
     SpatialInputSpec,
     SpatialRepresentation,
     TargetSpec,
-    TemporalResolution as InputTemporalResolution,
 )
 from forecast_interface.interface import (
     ArtifactScope,
@@ -29,7 +28,6 @@ from forecast_interface.interface import (
 from forecast_interface.output import (
     DeterministicData,
     ModelOutput,
-    TemporalResolution,
     Unit,
     VariableMetadata,
     VariableOutput,
@@ -55,11 +53,9 @@ def _make_model_output() -> ModelOutput:
             "station_1": {
                 "discharge": VariableOutput(
                     metadata=VariableMetadata(
-                        name="discharge",
                         unit=Unit.M3_PER_S,
-                        resolution=TemporalResolution.DAILY,
                         timedelta=timedelta(days=1),
-                        forecast_horizon=10,
+                        forecast_horizon=1,
                         offset=0,
                     ),
                     deterministic=DeterministicData(data=df),
@@ -79,11 +75,17 @@ def _make_input_requirement() -> InputRequirement:
             )
         },
         dynamic={
-            InputTemporalResolution.DAILY: SpatialInputSpec(
+            timedelta(days=1): SpatialInputSpec(
                 data={
                     SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                         past_known={
-                            "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
+                            "obs": {
+                                "q": PastKnownVariable(
+                                    unit=Unit.M3_PER_S,
+                                    lookback=1,
+                                    max_nan=0,
+                                )
+                            }
                         }
                     )
                 }

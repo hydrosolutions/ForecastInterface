@@ -1,5 +1,6 @@
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
+from .common import AggregationMethod
 from .input import (
     DynamicInputSpec,
     EnsembleMode,
@@ -27,7 +28,6 @@ from .output import (
     ForecastFlag,
     ModelOutput,
     QuantileData,
-    TemporalResolution,
     TrajectoryData,
     Unit,
     VariableMetadata,
@@ -36,6 +36,7 @@ from .output import (
 )
 
 __all__ = [
+    "AggregationMethod",
     "ArtifactScope",
     "DeterministicData",
     "DynamicInputSpec",
@@ -57,7 +58,6 @@ __all__ = [
     "SpatialInputSpec",
     "SpatialRepresentation",
     "TargetSpec",
-    "TemporalResolution",
     "TrainedArtifact",
     "TrajectoryData",
     "Unit",

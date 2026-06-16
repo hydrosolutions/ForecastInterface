@@ -39,8 +39,8 @@ class QuantileData(BaseModel):
     @field_validator("quantile_levels")
     @classmethod
     def _validate_levels(cls, v: list[float]) -> list[float]:
-        if not v:
-            raise ValueError("quantile_levels must not be empty")
+        if len(v) < 3:
+            raise ValueError("quantile_levels must contain at least 3 levels")
         for level in v:
             if not (0 < level < 1):
                 raise ValueError(f"quantile levels must be in (0, 1), got {level}")
@@ -69,9 +69,9 @@ class TrajectoryData(BaseModel):
 
     @field_validator("num_samples")
     @classmethod
-    def _positive_samples(cls, v: int) -> int:
-        if v <= 0:
-            raise ValueError(f"num_samples must be positive, got {v}")
+    def _minimum_samples(cls, v: int) -> int:
+        if v < 8:
+            raise ValueError(f"num_samples must be at least 8, got {v}")
         return v
 
     @model_validator(mode="after")
@@ -125,5 +125,31 @@ class VariableOutput(BaseModel):
                 raise ValueError(
                     "at least one of deterministic, quantiles, or trajectories "
                     "must be present when status is SUCCESS or PARTIAL"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_forecast_horizon(self) -> "VariableOutput":
+        for representation, data_container in (
+            ("deterministic", self.deterministic),
+            ("quantiles", self.quantiles),
+            ("trajectories", self.trajectories),
+        ):
+            if data_container is None:
+                continue
+            df = data_container.data
+            if df.height == 0:
+                raise ValueError(f"{representation} data must not be empty")
+            mismatches = (
+                df.group_by("issue_datetime")
+                .agg(pl.len().alias("rows"))
+                .filter(pl.col("rows") != self.metadata.forecast_horizon)
+            )
+            if mismatches.height:
+                observed = mismatches["rows"][0]
+                raise ValueError(
+                    f"{representation} data must contain exactly "
+                    f"{self.metadata.forecast_horizon} rows per issue_datetime "
+                    f"(got {observed})"
                 )
         return self
