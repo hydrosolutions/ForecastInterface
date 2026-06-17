@@ -218,7 +218,30 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 ---
 
-# 2. Open questions for the model developer
+# 2. For the model developer
+
+This section is the single place for what we need from / owe to the model developer: **open questions** still awaiting input, and **deviations** from the original proposal we'd like confirmed. The full Q&A record (answered + open) follows.
+
+## Still open — needs your input
+
+- **`config` contents (Q8)** — what the model needs in `config` at train / predict time.
+- **Per-product availability lag (Q9)** — how to express SnowMapper's lag behind ECMWF.
+- **Station-string identity (Q10)** — the exact string your artifacts store (human code vs UUID).
+
+## Deviations from the original proposal — please confirm
+
+The interface diverged from the original `init` proposal in these ways. Each is justified (see the linked decision / spec), but they change the original design, so we'd like your sign-off:
+
+- **Lifecycle ownership** — artifacts are **framework-owned** (`train` → `serialize_artifact` → SAP3 stores → `deserialize_artifact`) rather than loaded inside `__init__`; the model is artifact-stateless (see `docs/model_interface.md`, *Training & Lifecycle Protocol*).
+- **`forecast()` → `predict()`** — renamed to match SAP3.
+- **Output keying** — `dict[variable]` → **station-keyed** `dict[station][variable]` (decision 1.1).
+- **Spatial vocabulary** — `distributed` / `lumped` → `POINT` / `BASIN_AVERAGE` / `ELEVATION_BAND` / `GRIDDED` (decision 1.4).
+- **Ensemble flag** — `ensemble: bool` → `EnsembleMode` enum.
+- **Failure channel** — `forecast() → ModelOutput` → `predict() → ModelResult` (`Success | Failure`) (decision 1.7).
+- **Hindcast** — demoted from a core method to the optional `BatchHindcastModel` (decision 1.8).
+- **Time step** — `TemporalResolution` enum → `timedelta` keys (decision 1.12).
+
+## Question record
 
 A decision-ready list. Each needs the model developer's input before the corresponding spec is frozen.
 
@@ -267,3 +290,7 @@ What does the model need in `config` at `train` and `predict` time, beyond `inpu
 ### Q9 — Per-product availability lag — OPEN
 
 Products derived downstream (e.g. SnowMapper SWE / RoF, which run *after* their driving ECMWF forecast) may become available **later** than their nominal forcing — their future-known series lags the issue time. `InputRequirement`'s variable properties (`lookback`, `future_steps`, `max_nan`, `ensemble_mode`) have **no explicit lag / offset** field. Decide whether to **(a)** add a per-variable `availability_lag` (in steps), or **(b)** absorb it via `max_nan` / a shorter `future_steps`. Needs modeller + data-availability input.
+
+### Q10 — Station-string identity — OPEN (coordination)
+
+What exact string do your trained artifacts store as the station key — the **human / network station code**, or the **UUID string**? FI station keys are opaque `str` (decision 1.10), but they must match what the artifact embeds and be **stable across deployments** (staging → prod, east → west). Deployment portability argues for the code; the SAP3 adapter then maps `StationId` (UUID) ↔ that string. Confirm so the artifact and the adapter agree.
