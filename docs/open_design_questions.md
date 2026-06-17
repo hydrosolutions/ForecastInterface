@@ -78,7 +78,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Decision:** FI enforces **deployment-independent structural floors** only; SAP3's deployment-configurable operational floors are checked **loudly at integration time**, not silently at runtime.
 
-- **FI structural floors (hard validators):** QuantileData **≥ 3** levels (centre + two tails); TrajectoryData **≥ 8** samples. *(Code TODO: validators currently enforce ≥1 quantile / >0 trajectory — tighten to ≥3 / ≥8.)*
+- **FI structural floors (hard validators):** QuantileData **≥ 3** levels (centre + two tails); TrajectoryData **≥ 8** samples. *(Implemented.)*
 - **SAP3 operational floors (deployment config, SAP3-side):** `min_operational_quantile_levels` ≥ 7 with tail coverage (a level ≤0.05 and a level ≥0.95); `min_operational_ensemble_size` ≥ 20 members. Kept out of FI because they are deployment-specific.
 - **Deterministic-only is allowed, not forbidden.** A deterministic model may be strong; FI accepts deterministic output as structurally valid. But SAP3 has **no deterministic channel**, so deterministic-only is **non-operational** until the model supplies forecast uncertainty (quantiles/trajectories it emits, or a downstream uncertainty wrapper).
 - **No silent non-operational output.** The model declares its representation(s) and emitted count; SAP3 checks them against its deployment floor at **integration/registration time** and rejects incompatibles loudly. Net: *valid FI + declared counts ≥ deployment floor ⟹ operational.*
@@ -165,7 +165,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Deviation from Sandro:** the input hierarchy's level-1 "temporal resolution" is now keyed by `timedelta` rather than an enum — on the Sandro list — but forced by the 3h/6h requirement and more SAP3-consistent.
 
-*(Code TODO: change `InputRequirement.dynamic` key type to `timedelta`; remove `resolution` from `VariableMetadata`; remove `TemporalResolution` from `common/resolutions.py`; update validators and tests.)*
+*(Implemented.)*
 
 **Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`.
 
@@ -175,12 +175,12 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **(a) Vocabulary — documented canonical names.** Variable names stay free strings but must match SAP3's canonical set (`discharge`, `water_level`, `water_temperature`, `precipitation`, `temperature`, `relative_humidity`, `wind_speed`, `wind_direction`, `global_radiation`, `reference_et`, `snow_water_equivalent`, `runoff`). SAP3 soft-checks at integration. A documented contract, **not** a hard FI enum (avoids tracking SAP3's evolving set).
 
-**(b) Aggregation — optional per-variable override.** Add optional `aggregation: AggregationMethod` (`SUM`/`MEAN`, mirroring SAP3) to `PastKnownVariable` / `FutureKnownVariable`, used when the declared resolution is coarser than delivered data. Default = per-parameter convention (precip/ref_et = SUM, rest = MEAN); declared only to override. Correctness-critical, hence expressible, but optional. *(Code TODO: add `AggregationMethod` enum + optional field.)*
+**(b) Aggregation — optional per-variable override.** Add optional `aggregation: AggregationMethod` (`SUM`/`MEAN`, mirroring SAP3) to `PastKnownVariable` / `FutureKnownVariable`, used when the declared resolution is coarser than delivered data. Default = per-parameter convention (precip/ref_et = SUM, rest = MEAN); declared only to override. Correctness-critical, hence expressible, but optional. *(Implemented.)*
 
 **(c) Units — first-class on inputs and outputs ("no data without units").**
 - Inputs: model **declares the expected `unit`** per input variable (`PastKnownVariable` / `FutureKnownVariable` gain `unit: Unit`); delivered `ModelInputs` series are **tagged with unit**; SAP3 **delivers in the declared unit or rejects loudly at integration** (auto-conversion deferred to a future adapter feature).
 - Outputs: unchanged — `TargetSpec` / `VariableMetadata` already declare units.
-- **`Unit` enum expansion:** add `PERCENT` (%), `M_PER_S` (m/s), `DEGREE`, `W_PER_M2` (W/m²), `MM_PER_HOUR`. *(Code TODO: expand `common/units.py`; add `unit` field to `input/variable.py`.)*
+- **`Unit` enum expansion:** add `PERCENT` (%), `M_PER_S` (m/s), `DEGREE`, `W_PER_M2` (W/m²), `MM_PER_HOUR`. *(Implemented.)*
 
 **Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`, and code (`common/units.py`, `input/variable.py`).
 
@@ -240,13 +240,13 @@ A decision-ready list. Each needs the model developer's input before the corresp
 
 ### Q5 — `VariableMetadata` fields — ANSWERED
 
-- **(a) Drop `name`.** Redundant with the `ModelOutput.variables[station][variable]` key; two sources of truth that can disagree is forbidden by the type ethos. Field removed. *(Code TODO: remove `name` from `VariableMetadata`; update tests.)*
-- **(b) Keep `forecast_horizon`, add a per-issue-block cross-validator.** Kept because the adapter reads it directly (`ForecastEnsemble.forecast_horizon_steps`). Validator: for `predict`, `forecast_horizon == row count`; for batch `hindcast`, `forecast_horizon == rows per issue_datetime` (one block per issue time, decision 1.8). *(Code TODO: add validator.)*
+- **(a) Drop `name`.** Redundant with the `ModelOutput.variables[station][variable]` key; two sources of truth that can disagree is forbidden by the type ethos. Field removed. *(Implemented.)*
+- **(b) Keep `forecast_horizon`, add a per-issue-block cross-validator.** Kept because the adapter reads it directly (`ForecastEnsemble.forecast_horizon_steps`). Validator: for `predict`, `forecast_horizon == row count`; for batch `hindcast`, `forecast_horizon == rows per issue_datetime` (one block per issue time, decision 1.8). *(Implemented.)*
 - **(c) `offset` semantics confirmed:** number of steps (each `timedelta` long) between the **last observation and the first forecast step**. `offset = 1` ⇒ first forecast valid time is `last_obs + 1·timedelta` (usual next-step case); `offset = 2` ⇒ a one-step gap. Model and adapter both assume this convention.
 
 **Reflected in:** `docs/model_interface.md`.
 
-### Q6 — Per-row `issue_datetime` column
+### Q6 — Per-row `issue_datetime` column — ANSWERED (scoped by decision 1.8)
 
 The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` and renames the per-row datetime column → `valid_time`. The question is whether to **keep the per-row `issue_datetime` column requirement** — with a cross-validator that it matches the top-level `issue_datetime` for forecasts — or **relax it**. Frame this as a validator question, not a removal: the column is not "dropped", it is renamed and re-used.
 

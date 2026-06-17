@@ -8,83 +8,30 @@ uv add forecastinterface
 
 ## Documentation
 
-- [Model Interface Specification](docs/model_interface.md)
-- [Input Requirement Specification](docs/input_requirement.md)
+- [Model Interface Specification](docs/model_interface.md) — the `ForecastModel` protocol, training/lifecycle, and `ModelOutput` types
+- [Input Requirement Specification](docs/input_requirement.md) — the `InputRequirement` declaration and the `ModelInputs` bundle
+- [FI ↔ SAP3 Mapping](docs/fi-sap3-mapping.md) — how FI types map onto the SAPPHIRE_flow adapter boundary
 
 ## ModelOutput
 
-Top-level container holding forecast results, keyed by station then variable. Each variable can independently carry deterministic forecasts, quantile forecasts, trajectory ensembles, or any combination.
+The result of `predict` / `hindcast` (returned via `ModelResult`). A **station-keyed** container — `variables: dict[station_id, dict[variable_name, VariableOutput]]` — where each `VariableOutput` carries any combination of deterministic, quantile, trajectory, and epistemic-uncertainty data, plus a `status` (`SUCCESS`/`FAILURE`/`PARTIAL`) and quality `flags`. A single-station model returns a one-key outer dict; missing stations are explicit `FAILURE` entries, never absent keys.
 
-`variables` is station-keyed: `station_id → variable_name → VariableOutput`. A single-station model returns a one-key outer dict. Missing stations are explicit `FAILURE` entries (a `VariableOutput` with `status == FAILURE`), never absent keys — the model echoes back every station id it was given.
+See the [Model Interface Specification](docs/model_interface.md) for the full schema, DataFrame layouts, and enums.
 
-### Structure
+## InputRequirement
 
-```
-ModelOutput
-    model_name: str
-    issue_datetime: datetime
-    success: bool                                    # derived — True when all variables (across all stations) succeeded
-    variables: dict[str, dict[str, VariableOutput]]  # station_id → variable_name → VariableOutput
+Declares what data a model needs: forecast `targets`, `dynamic` inputs nested as `timedelta` time step → spatial representation → past/future → product → variable (each with its `unit`, `lookback`/`future_steps`, `max_nan`, and optional `aggregation`), and `static` attributes. At run time the model receives a `ModelInputs` bundle isomorphic to this declaration.
 
-VariableOutput
-    metadata: VariableMetadata
-    deterministic: DeterministicData | None
-    quantiles: QuantileData | None
-    trajectories: TrajectoryData | None
-    epistemic_uncertainty: EpistemicUncertaintyData | None
-    status: VariableStatus                 # SUCCESS | FAILURE | PARTIAL
-    flags: frozenset[ForecastFlag]
+See the [Input Requirement Specification](docs/input_requirement.md) for the full structure and examples.
 
-VariableMetadata
-    unit: Unit                             # e.g. Unit.M3_PER_S → "m³/s"
-    timedelta: timedelta                   # time step between forecast points
-    forecast_horizon: int                  # forecast steps per issue_datetime block (> 0)
-    offset: int                            # offset in steps (>= 0)
-
-DeterministicData
-    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "value"]
-
-QuantileData
-    quantile_levels: list[float]           # e.g. [0.1, 0.5, 0.9] — sorted, in (0, 1)
-    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "0.1", "0.5", "0.9"]
-
-TrajectoryData
-    num_samples: int                       # number of ensemble members (>= 8)
-    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "1", "2", ..., "N"]
-
-EpistemicUncertaintyData
-    data: pl.DataFrame                     # columns: ["issue_datetime", "datetime", "std", "range"]
-```
-
-### DataFrame Schemas
-
-All DataFrames are validated on construction:
-
-| Container | `issue_datetime` column | `datetime` column | Value columns |
-|---|---|---|---|
-| `DeterministicData` | `Datetime` | `Datetime` | `value` (numeric) |
-| `QuantileData` | `Datetime` | `Datetime` | One per level, named as float strings: `"0.1"`, `"0.5"`, ... |
-| `TrajectoryData` | `Datetime` | `Datetime` | One per sample, named `"1"`, `"2"`, ..., `"N"` |
-| `EpistemicUncertaintyData` | `Datetime` | `Datetime` | `std` (numeric), `range` (numeric) |
-
-### Enums
-
-**Unit** -- `M3_PER_S`, `MM_PER_DAY`, `MM_PER_S`, `MM`, `CM`, `M`, `DEG_C`, `UNITLESS`, `PERCENT`, `M_PER_S`, `DEGREE`, `W_PER_M2`, `MM_PER_HOUR`
-
-**AggregationMethod** -- `SUM`, `MEAN`
-
-**VariableStatus** -- `SUCCESS`, `FAILURE`, `PARTIAL`
-
-**ForecastFlag** -- `HIGH_EPISTEMIC_UNCERTAINTY`, `DATA_AVAILABILITY`
-
-### Usage
+## Usage
 
 ```python
 from datetime import datetime, timedelta
 import polars as pl
 from forecast_interface import (
     ModelOutput, VariableOutput, VariableMetadata,
-    DeterministicData, QuantileData, Unit, VariableStatus,
+    DeterministicData, Unit, VariableStatus,
 )
 
 issue_dt = datetime(2024, 6, 1, 6, 0)
@@ -115,50 +62,3 @@ output = ModelOutput(
 
 assert output.success is True
 ```
-
-## InputRequirement
-
-Declares what data a forecasting model needs. The preprocessing pipeline reads this spec and provides exactly the required inputs.
-
-See [Input Requirement Specification](docs/input_requirement.md) for full documentation.
-
-### Structure
-
-```
-InputRequirement
-    targets: dict[str, TargetSpec]                  # what the model forecasts
-    dynamic: dict[timedelta, SpatialInputSpec]
-    static: set[str]
-
-TargetSpec
-    unit: Unit
-    representations: frozenset[OutputRepresentation]  # DETERMINISTIC | QUANTILES | TRAJECTORIES
-
-SpatialInputSpec
-    data: dict[SpatialRepresentation, DynamicInputSpec]
-
-DynamicInputSpec
-    past_known: dict[str, dict[str, PastKnownVariable]]
-    future_known: dict[str, dict[str, FutureKnownVariable]]
-
-PastKnownVariable
-    lookback: int
-    max_nan: int
-    unit: Unit
-    aggregation: AggregationMethod | None
-
-FutureKnownVariable
-    future_steps: int
-    max_nan: int
-    unit: Unit
-    aggregation: AggregationMethod | None
-    ensemble_mode: EnsembleMode    # SINGLE or ENSEMBLE
-```
-
-### Enums
-
-**SpatialRepresentation** -- `POINT`, `BASIN_AVERAGE`, `ELEVATION_BAND`, `GRIDDED`
-
-**OutputRepresentation** -- `DETERMINISTIC`, `QUANTILES`, `TRAJECTORIES`
-
-**AggregationMethod** -- `SUM`, `MEAN`

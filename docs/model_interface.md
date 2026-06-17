@@ -19,7 +19,7 @@ Produce a `TrainedArtifact` from training inputs. See the Training & Lifecycle P
 
 ## Training & Lifecycle Protocol
 
-> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata and the group-artifact embedding-key / station-set-mismatch contract are **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4 and §8).
+> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata is **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4); the group-artifact embedding-key / station-set-mismatch contract is **v1 load-bearing** (see the `TrainedArtifact` section below and decision 1.10).
 
 ### Scope: `ArtifactScope`
 

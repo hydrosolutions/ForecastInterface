@@ -177,7 +177,7 @@ ForecastInterface input requirements must be able to express:
 - SnowMapper variables such as SWE and snowmelt as past and/or future dynamic
   features;
 - product/source names and versions;
-- spatial representation: lumped/basin-average, HRU/elevation-band, or gridded;
+- spatial representation: POINT, BASIN_AVERAGE, ELEVATION_BAND, or GRIDDED;
 - static catchment attributes required by the model;
 - allowed missing-data thresholds per variable and product.
 

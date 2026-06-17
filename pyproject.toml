@@ -1,6 +1,6 @@
 [project]
 name = "forecastinterface"
-version = "0.1.13"
+version = "0.1.14"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.bumpversion]
-current_version = "0.1.13"
+current_version = "0.1.14"
 commit = false
 tag = false
 allow_dirty = true
