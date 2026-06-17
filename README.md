@@ -10,7 +10,6 @@ uv add forecastinterface
 
 - [Model Interface Specification](docs/model_interface.md) — the `ForecastModel` protocol, training/lifecycle, and `ModelOutput` types
 - [Input Requirement Specification](docs/input_requirement.md) — the `InputRequirement` declaration and the `ModelInputs` bundle
-- [FI ↔ SAP3 Mapping](docs/fi-sap3-mapping.md) — how FI types map onto the SAPPHIRE_flow adapter boundary
 
 ## ModelOutput
 

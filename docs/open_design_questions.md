@@ -10,7 +10,7 @@ ForecastInterface (FI) is the contract model authors implement. SAPPHIRE Flow (S
 - **FI INPUT types are co-designed** via a SAP3 → FI PR.
 - **FI's INTERFACE / protocol is FI-owned**, with SAP3 wrapping thin.
 
-These decisions are reflected in `docs/model_interface.md` and the new `docs/fi-sap3-mapping.md` (the FI ↔ SAP3 adapter mapping). This file does not duplicate their content.
+These decisions are reflected in `docs/model_interface.md` and `docs/input_requirement.md`. This file does not duplicate their content. The FI ↔ SAP3 adapter mapping lives with the adapter in SAPPHIRE_flow.
 
 ---
 
@@ -36,7 +36,7 @@ A single-station model returns a dict with one key, e.g. `{"station_xyz": {"disc
 
 **Cross-repo note:** this advances a v1-deferred GROUP-path item and requires SAP3's adapter to extend from STATION-only to GROUP — a cross-repo coordination item.
 
-**Reflected in:** `docs/model_interface.md`, `docs/fi-sap3-mapping.md`.
+**Reflected in:** `docs/model_interface.md`.
 
 ## 1.2 Target declaration — RESOLVED
 
@@ -87,7 +87,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Model developer input (Nepal):** the model emits **quantiles** (count configurable at training); **trajectories** typically ~50 (deployment-specific, may be fewer).
 
-**Reflected in:** `docs/model_interface.md`, `docs/fi-sap3-mapping.md`.
+**Reflected in:** `docs/model_interface.md`.
 
 ## 1.6 Nepal v1 deployment specifics — RESOLVED (model developer)
 
@@ -97,7 +97,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 - **SnowMapper forcing starts with SWE and ROF** (snow water equivalent and runoff), declared as dynamic forcing at **`BASIN_AVERAGE` or `ELEVATION_BAND`** (see decision 1.4; Q7 broadened this from ELEVATION_BAND-only). Lead times / resolutions follow the ECMWF forecast and ERA5-Land (Q7), with a possible SnowMapper availability lag (Q9).
 - **Artifact transfer direction is east → west** (an eastern group artifact applied to western gauges). This makes the embedding-key / station-set-mismatch contract (Nepal §8) concrete: the eastern GROUP artifact **must define its behaviour when applied to the western station set** — handle gracefully or raise an explicit error, never silently associate a station with the wrong embedding.
 
-**Reflected in:** `docs/nepal-model-requirements.md`, `docs/model_interface.md` (artifact portability), `docs/fi-sap3-mapping.md` (artifact metadata ownership).
+**Reflected in:** `docs/model_interface.md` (artifact portability).
 
 ## 1.7 Failure channel — RESOLVED
 
@@ -198,7 +198,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Station-set mismatch (known vs unknown stations):** a GROUP artifact stores its trained member stations. At predict time, **known** stations use the stored per-station state; **unknown** stations (e.g. western gauges under east→west transfer) must be handled by **generalizing from static attributes or raising an explicit error — never silently mis-associating** a prediction with the wrong station / embedding. This is the embedding-key contract (Nepal §8). **Timing flag:** decision 1.6 puts east→west in Nepal v1 and groups ship from the start, so this contract is likely **v1, not Phase 4** — re-evaluate the deferral.
 
-**Reflected in:** `docs/model_interface.md`, `docs/fi-sap3-mapping.md` (§5, §7), `docs/nepal-model-requirements.md` (§8).
+**Reflected in:** `docs/model_interface.md`.
 
 ## 1.9 Input bundle (`inputs`) typing & v1 delivery scope — RESOLVED
 
@@ -214,7 +214,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **`config` (train / predict): OPEN — modeller-owned** (see Q8). Until specified, `config` stays `Any`.
 
-**Reflected in:** `docs/input_requirement.md`, `docs/fi-sap3-mapping.md` (§4), and a future `ModelInputs` type (code).
+**Reflected in:** `docs/input_requirement.md`, and the `ModelInputs` type (code).
 
 ---
 

@@ -2,7 +2,7 @@
 
 The primary goal of this package is to define the interface between any forecasting library and the forecasting model. The forecasting model can be implemented in any package / code base but needs to follow the protocol defined here.
 
-There are **three protocols**: the required `ForecastModel`, plus two optional extensions — `RetrainableModel` (warm-start `retrain`) and `BatchHindcastModel` (efficient batch `hindcast`), both of which extend `ForecastModel`. A `StatefulModel` extension is **reserved** for future conceptual / hybrid models (see *Warm-up and state* below). The scope of a model (single station vs. group / national) is **declared** via `artifact_scope`, not split into separate protocols. SAP3 consumes the FI protocol through a thin adapter that dispatches to its own `StationForecastModel` / `GroupForecastModel` — see [`docs/fi-sap3-mapping.md`](./fi-sap3-mapping.md). The driving requirements for the first (Nepal v1) integration are in [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md).
+There are **three protocols**: the required `ForecastModel`, plus two optional extensions — `RetrainableModel` (warm-start `retrain`) and `BatchHindcastModel` (efficient batch `hindcast`), both of which extend `ForecastModel`. A `StatefulModel` extension is **reserved** for future conceptual / hybrid models (see *Warm-up and state* below). The scope of a model (single station vs. group / national) is **declared** via `artifact_scope`, not split into separate protocols. SAP3 consumes the FI protocol through a thin adapter (built in SAPPHIRE_flow) that dispatches to its own `StationForecastModel` / `GroupForecastModel`. The first integration target is Nepal v1.
 
 Core functionalities include:
 
@@ -19,7 +19,7 @@ Produce a `TrainedArtifact` from training inputs. See the Training & Lifecycle P
 
 ## Training & Lifecycle Protocol
 
-> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata is **deferred to Phase 4** (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4); the group-artifact embedding-key / station-set-mismatch contract is **v1 load-bearing** (see the `TrainedArtifact` section below and decision 1.10).
+> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata is **deferred to Phase 4**; the group-artifact embedding-key / station-set-mismatch contract is **v1 load-bearing** (see the `TrainedArtifact` section below and decision 1.10).
 
 ### Scope: `ArtifactScope`
 
@@ -62,7 +62,7 @@ The `inputs` parameters use `ModelInputs`; only `config` is typed `Any` (provisi
 - **Self-contained**: `serialize_artifact` produces `bytes` that embed all weights, scalers, and metadata — **with no absolute filesystem paths** and no machine-local references.
 - **Deployment-portable**: `deserialize_artifact(serialize_artifact(a))` must reconstruct an artifact that runs **unchanged on another SAP3 instance**.
 
-**Partly deferred.** Rich provenance metadata (scope, region, training period, hashes, seed, product versions) is **not** part of the marker Protocol yet and lands in Phase 4 (see [`docs/nepal-model-requirements.md`](./nepal-model-requirements.md) §4).
+**Partly deferred.** Rich provenance metadata (scope, region, training period, hashes, seed, product versions) is **not** part of the marker Protocol yet and lands in Phase 4.
 
 The **group-artifact embedding-key / station-set-mismatch contract**, however, is **load-bearing from v1**, because `GROUP` artifacts ship from the start (decision 1.10) and east→west transfer is a Nepal v1 target (decision 1.6) — re-evaluate its earlier Phase 4 deferral. The contract: a `GROUP` artifact **embeds the meaningful station strings it was trained on** (which the model reads to key per-station state); it must define behaviour when the predict-time station set differs from the trained set — **known** stations use stored state, **unknown** stations are generalized from static attributes or rejected with an explicit error — and it must **never silently mis-associate** a prediction with the wrong station. Station strings are **stable, meaningful identifiers** that round-trip unchanged through `serialize_artifact` / `deserialize_artifact` and across deployments; the model never alters them.
 
@@ -83,7 +83,7 @@ FI's protocol is **state-free in v0**: `predict` / `hindcast` take no `state` pa
 
 ### Output stays FI-authoritative
 
-`predict` / `hindcast` **return** `ModelResult` → `ModelOutput` (defined below). `ModelOutput` is **not** replaced by SAP3's `ForecastEnsemble`: the SAP3 adapter maps `ModelOutput` *into* its own representation, never the other way around. See [`docs/fi-sap3-mapping.md`](./fi-sap3-mapping.md) for the field-level mapping.
+`predict` / `hindcast` **return** `ModelResult` → `ModelOutput` (defined below). `ModelOutput` is **not** replaced by SAP3's `ForecastEnsemble`: the SAP3 adapter maps `ModelOutput` *into* its own representation, never the other way around. The field-level mapping is implemented by the SAP3 adapter (in SAPPHIRE_flow).
 
 ### Failure & result model
 
