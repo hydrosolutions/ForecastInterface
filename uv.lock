@@ -85,7 +85,7 @@ wheels = [
 
 [[package]]
 name = "forecastinterface"
-version = "0.1.10"
+version = "0.1.11"
 source = { virtual = "." }
 dependencies = [
     { name = "polars" },
