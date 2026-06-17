@@ -45,7 +45,7 @@ class ModelOutput(BaseModel):
                     raise ValueError("variable name keys must be non-empty strings")
         return v
 
-    @computed_field  # type: ignore[prop-decorator]
+    @computed_field  # type: ignore[prop-decorator]  # pydantic computed_field + property: known mypy false positive
     @property
     def success(self) -> bool:
         return all(

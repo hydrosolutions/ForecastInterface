@@ -31,7 +31,7 @@ def _make_metadata(**overrides: object) -> VariableMetadata:
         "offset": 0,
     }
     defaults.update(overrides)
-    return VariableMetadata(**defaults)  # type: ignore[arg-type]
+    return VariableMetadata.model_validate(defaults)
 
 
 def _make_det_df() -> pl.DataFrame:
