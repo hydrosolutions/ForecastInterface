@@ -192,7 +192,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 - The same station string must be used consistently across **train → artifact → predict → output**.
 - The model may **read** the key (look it up in its artifact) but must **never alter** it; output is keyed by exactly the strings received.
-- The string must be **stable across deployments** (staging → prod, east → west), because artifacts embed it and must be portable. This argues for a **deployment-stable human / network station code**, NOT a per-DB UUID. **Open coordination item:** confirm the exact string the modeller's artifacts store; the SAP3 adapter maps `StationId` (UUID) ↔ that string (via `StationConfig.code` if it is the code).
+- The string must be **stable across deployments** (staging → prod, east → west), because artifacts embed it and must be portable. **Resolved (Q10):** the key is the **station / gauge code**, not a per-DB UUID; the SAP3 adapter maps `StationId` (UUID) ↔ code (via `StationConfig.code`). Residual: Sandro confirms his trained artifacts key on the code.
 
 **Group support from v1:** `ArtifactScope.GROUP` is load-bearing from the start (consistent with 1.6). Multiple input stations may **share one group artifact**; output stays **1:1 station-in / station-out** — every input station gets an output entry. Grouping is about *artifact sharing*, not output cardinality.
 
@@ -224,9 +224,9 @@ This section is the single place for what we need from / owe to the model develo
 
 ## Still open — needs your input
 
-- **`config` contents (Q8)** — what the model needs in `config` at train / predict time.
-- **Per-product availability lag (Q9)** — how to express SnowMapper's lag behind ECMWF.
-- **Station-string identity (Q10)** — the exact string your artifacts store (human code vs UUID).
+- **`config` contents (Q8)** — Sandro must enumerate the train-time config before we partition ownership and type it. *(The main open item.)*
+- **Availability-lag values (Q9)** — mechanism settled (reduced per-variable `future_steps`); the concrete SnowMapper step-counts are owed by Sandro / data availability.
+- **Station-code confirmation (Q10)** — key decided (station code); Sandro confirms his artifacts key on it (re-key if not).
 
 ## Deviations from the original proposal — please confirm
 
@@ -247,7 +247,7 @@ A decision-ready list. Each needs the model developer's input before the corresp
 
 ### Q1 — Station ID typing — ANSWERED
 
-**Answer:** opaque `str` keys (not typed UUIDs), but they **carry meaning and are stable** across train / predict / deployment — the trained station strings are stored inside the artifact and read by the model for per-station lookup. Group artifacts shared across multiple stations are supported **from v1**; output is **1:1 station-in / station-out**; the station-set-mismatch case (unknown stations) is handled by the embedding-key contract (generalize or raise, never silent). **Residual coordination item:** the exact string identity (human code vs UUID-string) must match what the modeller's artifacts store — deployment portability argues for the code. See decision 1.10.
+**Answer:** opaque `str` keys (not typed UUIDs), but they **carry meaning and are stable** across train / predict / deployment — the trained station strings are stored inside the artifact and read by the model for per-station lookup. Group artifacts shared across multiple stations are supported **from v1**; output is **1:1 station-in / station-out**; the station-set-mismatch case (unknown stations) is handled by the embedding-key contract (generalize or raise, never silent). **Residual:** resolved to the **station code** (Q10 / decision 1.10); Sandro confirms his artifacts key on it.
 
 ### Q2 — Past-target availability — ANSWERED
 
@@ -275,9 +275,15 @@ The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` a
 
 **Now scoped by decision 1.8:** a plain `ForecastModel` (`predict`) always emits a constant per-row `issue_datetime` equal to the top-level one — so for the required surface this *can* carry a strict cross-validator. The varying-per-row case exists **only** on the optional `BatchHindcastModel` path, where the validator must instead check that the per-row `issue_datetime` matches the batch's declared `issue_datetimes`. So the answer likely differs by protocol: strict equality for `predict`, set-membership for batch `hindcast`.
 
-### Q8 — `config` contents (train / predict) — OPEN (modeller-owned)
+### Q8 — `config` contents — OPEN (awaiting Sandro, then partition)
 
-What does the model need in `config` at `train` and `predict` time, beyond `inputs` and the injected `rng`? Candidates: training hyperparameters, target quantile levels / trajectory count, forecast horizon, validation split, early-stopping criteria, seeds beyond `rng`. This is **modeller-owned** and must be specified before `config: Any` can be typed (decision 1.9).
+`config` is passed to **`train` / `retrain` only** — `predict` / `hindcast` take no `config`.
+
+**Resolution process (two steps):**
+1. **Sandro enumerates** what the model puts in `config` at train time — hyperparameters, the **quantile levels** it emits, trajectory/sample count, validation-split date, early-stopping criteria, etc. (Not forecast horizon — the model owns that, decision 1.15. Not seeds — `rng` is injected.)
+2. **We partition** each field into **model-private** (opaque to FI/SAP3) vs **operationally-shared** (FI/SAP3 needs to read or set it). The likely shared candidate is the **quantile levels** (SAP3 may need specific quantiles for danger thresholds).
+
+**Interim typing:** `config` stays `Any` until the partition is known; the expected end state is an opaque `dict[str, Any]` for model-private params (mirroring SAP3's `ModelParams`), with any operationally-shared fields lifted into a typed slot. (decision 1.9)
 
 ### Q7 — SnowMapper lead times — ANSWERED (with caveat)
 
@@ -287,10 +293,16 @@ What does the model need in `config` at `train` and `predict` time, beyond `inpu
 
 **Reflected in:** `docs/input_requirement.md`, decision 1.6.
 
-### Q9 — Per-product availability lag — OPEN
+### Q9 — Per-product availability lag — RESOLVED (mechanism); values owed
 
-Products derived downstream (e.g. SnowMapper SWE / RoF, which run *after* their driving ECMWF forecast) may become available **later** than their nominal forcing — their future-known series lags the issue time. `InputRequirement`'s variable properties (`lookback`, `future_steps`, `max_nan`, `ensemble_mode`) have **no explicit lag / offset** field. Decide whether to **(a)** add a per-variable `availability_lag` (in steps), or **(b)** absorb it via `max_nan` / a shorter `future_steps`. Needs modeller + data-availability input.
+Products derived downstream (e.g. SnowMapper SWE / RoF, which run *after* their driving ECMWF forecast) become available **later** than their nominal forcing — at issue time T their future-known series reaches fewer steps ahead than the ECMWF series driving them.
 
-### Q10 — Station-string identity — OPEN (coordination)
+**Mechanism — option (b):** represent the lag as **reduced per-variable `future_steps`** (the lagging product simply declares fewer future steps than its driving forcing, e.g. ECMWF precip `future_steps=15` vs SnowMapper SWE `future_steps=13`), with `max_nan` absorbing any residual ragged tail. **No dedicated `availability_lag` field** — it would be speculative complexity; the existing per-variable knobs already express the shorter-future-coverage case. If a genuine *leading-gap / offset* case ever appears that `future_steps` can't express, add the field then (additive, non-breaking).
 
-What exact string do your trained artifacts store as the station key — the **human / network station code**, or the **UUID string**? FI station keys are opaque `str` (decision 1.10), but they must match what the artifact embeds and be **stable across deployments** (staging → prod, east → west). Deployment portability argues for the code; the SAP3 adapter then maps `StationId` (UUID) ↔ that string. Confirm so the artifact and the adapter agree.
+**Still owed (Sandro / data availability):** the concrete step counts — how many fewer future steps SnowMapper SWE / ROF actually cover vs. the ECMWF horizon.
+
+### Q10 — Station-string identity — RESOLVED (station code)
+
+**Decision:** the station key is the **station / gauge code** (the deployment-stable human / network identifier), **not** a per-DB UUID. The UUID stays internal to SAP3; its adapter maps `StationId` (UUID) ↔ code (via `StationConfig.code`) at the boundary. Chosen for portability — the artifact embeds these strings, and they must survive staging → prod and east → west transfer, where UUIDs are not stable across databases but codes are.
+
+**Residual (Sandro):** confirm his already-trained artifacts key on the station code (and re-key if they currently use a UUID / internal id).
