@@ -120,6 +120,7 @@ value: str | None = None
 - Use `ruff` for both linting and formatting:
   - Format: `uv run ruff format`
   - Lint + fix: `uv run ruff check --fix`
+- Required strict type check: `uv run mypy`. Under strict `no_implicit_reexport`, add new public symbols to `__all__`.
 
 ### Version Bumping (mandatory)
 

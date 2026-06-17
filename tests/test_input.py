@@ -54,7 +54,7 @@ class TestPastKnownVariable:
 
     def test_unit_required(self) -> None:
         with pytest.raises(ValidationError, match="unit"):
-            PastKnownVariable(lookback=1, max_nan=0)
+            PastKnownVariable.model_validate({"lookback": 1, "max_nan": 0})
 
     def test_lookback_zero(self) -> None:
         with pytest.raises(ValidationError, match="lookback must be positive"):
@@ -97,7 +97,7 @@ class TestFutureKnownVariable:
 
     def test_unit_required(self) -> None:
         with pytest.raises(ValidationError, match="unit"):
-            FutureKnownVariable(future_steps=1, max_nan=0)
+            FutureKnownVariable.model_validate({"future_steps": 1, "max_nan": 0})
 
     def test_ensemble_mode_default_single(self) -> None:
         v = FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=5, max_nan=0)
@@ -147,7 +147,9 @@ class TestTargetSpec:
 
     def test_unit_required(self) -> None:
         with pytest.raises(ValidationError, match="unit"):
-            TargetSpec(representations=frozenset({OutputRepresentation.DETERMINISTIC}))
+            TargetSpec.model_validate(
+                {"representations": frozenset({OutputRepresentation.DETERMINISTIC})}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -441,28 +443,30 @@ class TestInputRequirement:
             )
 
     def test_duplicate_static_deduplicated(self) -> None:
-        req = InputRequirement(
-            targets=_target(),
-            dynamic={
-                DAILY: SpatialInputSpec(
-                    data={
-                        SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
-                            past_known={
-                                "obs": {
-                                    "q": PastKnownVariable(
-                                        unit=Unit.M3_PER_S, lookback=1, max_nan=0
-                                    )
+        req = InputRequirement.model_validate(
+            {
+                "targets": _target(),
+                "dynamic": {
+                    DAILY: SpatialInputSpec(
+                        data={
+                            SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
+                                past_known={
+                                    "obs": {
+                                        "q": PastKnownVariable(
+                                            unit=Unit.M3_PER_S, lookback=1, max_nan=0
+                                        )
+                                    }
                                 }
-                            }
-                        )
-                    }
-                )
-            },
-            static=[
-                "area",
-                "area",
-                "slope",
-            ],  # list with duplicates, Pydantic coerces to set
+                            )
+                        }
+                    )
+                },
+                "static": [
+                    "area",
+                    "area",
+                    "slope",
+                ],  # list with duplicates, Pydantic coerces to set
+            }
         )
         assert len(req.static) == 2
 

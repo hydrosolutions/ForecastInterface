@@ -303,9 +303,11 @@ class TestForecastModel:
                 inputs: ModelInputs,
                 issue_datetime: datetime,
                 rng: Random,
-            ) -> ModelResult: ...
+            ) -> ModelResult:
+                raise NotImplementedError
 
-            def serialize_artifact(self, artifact: TrainedArtifact) -> bytes: ...
+            def serialize_artifact(self, artifact: TrainedArtifact) -> bytes:
+                raise NotImplementedError
 
             def deserialize_artifact(self, raw: bytes) -> TrainedArtifact: ...
 
@@ -330,7 +332,8 @@ class TestForecastModel:
                 inputs: ModelInputs,
                 issue_datetime: datetime,
                 rng: Random,
-            ) -> ModelResult: ...
+            ) -> ModelResult:
+                raise NotImplementedError
 
             def deserialize_artifact(self, raw: bytes) -> TrainedArtifact: ...
 

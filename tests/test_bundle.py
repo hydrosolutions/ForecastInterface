@@ -64,7 +64,7 @@ class TestInputSeries:
 
     def test_unit_required(self) -> None:
         with pytest.raises(ValidationError, match="unit"):
-            InputSeries(data=_single_df())
+            InputSeries.model_validate({"data": _single_df()})
 
     def test_nan_in_value_accepted(self) -> None:
         df = pl.DataFrame({"datetime": [DT1], "value": [float("nan")]})
