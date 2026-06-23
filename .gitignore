@@ -11,3 +11,7 @@ wheels/
 # All __pycache__ directories
 **/__pycache__/
 .DS_Store
+
+# Claude Code: track shared skills, ignore machine-local settings and agent memory
+.claude/settings.local.json
+.claude/projects/

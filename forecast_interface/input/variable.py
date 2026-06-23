@@ -2,6 +2,9 @@ from enum import Enum
 
 from pydantic import BaseModel, field_validator
 
+from forecast_interface.common.aggregation import AggregationMethod
+from forecast_interface.common.units import Unit
+
 
 class EnsembleMode(Enum):
     SINGLE = "single"
@@ -11,6 +14,8 @@ class EnsembleMode(Enum):
 class PastKnownVariable(BaseModel):
     lookback: int
     max_nan: int
+    unit: Unit
+    aggregation: AggregationMethod | None = None
 
     @field_validator("lookback")
     @classmethod
@@ -30,6 +35,8 @@ class PastKnownVariable(BaseModel):
 class FutureKnownVariable(BaseModel):
     future_steps: int
     max_nan: int
+    unit: Unit
+    aggregation: AggregationMethod | None = None
     ensemble_mode: EnsembleMode = EnsembleMode.SINGLE
 
     @field_validator("future_steps")

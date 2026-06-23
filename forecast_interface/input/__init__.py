@@ -1,19 +1,35 @@
-from forecast_interface.common.resolutions import SpatialResolution, TemporalResolution
+from forecast_interface.common.aggregation import AggregationMethod
+from forecast_interface.common.resolutions import SpatialRepresentation
 
+from .bundle import (
+    DynamicInputs,
+    InputSeries,
+    ModelInputs,
+    SpatialInputs,
+    StationInputs,
+)
 from .requirement import (
     DynamicInputSpec,
     InputRequirement,
     SpatialInputSpec,
 )
+from .target import OutputRepresentation, TargetSpec
 from .variable import EnsembleMode, FutureKnownVariable, PastKnownVariable
 
 __all__ = [
+    "AggregationMethod",
+    "DynamicInputs",
     "DynamicInputSpec",
     "EnsembleMode",
     "FutureKnownVariable",
     "InputRequirement",
+    "InputSeries",
+    "ModelInputs",
+    "OutputRepresentation",
     "PastKnownVariable",
-    "SpatialResolution",
-    "TemporalResolution",
+    "SpatialInputs",
     "SpatialInputSpec",
+    "SpatialRepresentation",
+    "StationInputs",
+    "TargetSpec",
 ]

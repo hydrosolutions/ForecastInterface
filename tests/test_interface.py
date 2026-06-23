@@ -1,4 +1,6 @@
+from collections.abc import Sequence
 from datetime import datetime, timedelta
+from random import Random
 from typing import Any
 
 import polars as pl
@@ -8,22 +10,27 @@ from pydantic import ValidationError
 from forecast_interface.input import (
     DynamicInputSpec,
     InputRequirement,
+    ModelInputs,
+    OutputRepresentation,
     PastKnownVariable,
     SpatialInputSpec,
-    SpatialResolution,
-    TemporalResolution as InputTemporalResolution,
+    SpatialRepresentation,
+    TargetSpec,
 )
 from forecast_interface.interface import (
+    ArtifactScope,
+    BatchHindcastModel,
     FailureCause,
     ForecastModel,
     ModelFailure,
     ModelResult,
     ModelSuccess,
+    RetrainableModel,
+    TrainedArtifact,
 )
 from forecast_interface.output import (
     DeterministicData,
     ModelOutput,
-    TemporalResolution,
     Unit,
     VariableMetadata,
     VariableOutput,
@@ -46,35 +53,47 @@ def _make_model_output() -> ModelOutput:
         model_name="test_model",
         issue_datetime=_ISSUE_DT,
         variables={
-            "discharge": VariableOutput(
-                metadata=VariableMetadata(
-                    name="discharge",
-                    unit=Unit.M3_PER_S,
-                    resolution=TemporalResolution.DAILY,
-                    timedelta=timedelta(days=1),
-                    forecast_horizon=10,
-                    offset=0,
-                ),
-                deterministic=DeterministicData(data=df),
-                status=VariableStatus.SUCCESS,
-            )
+            "station_1": {
+                "discharge": VariableOutput(
+                    metadata=VariableMetadata(
+                        unit=Unit.M3_PER_S,
+                        timedelta=timedelta(days=1),
+                        forecast_horizon=1,
+                        offset=0,
+                    ),
+                    deterministic=DeterministicData(data=df),
+                    status=VariableStatus.SUCCESS,
+                )
+            }
         },
     )
 
 
 def _make_input_requirement() -> InputRequirement:
     return InputRequirement(
+        targets={
+            "q": TargetSpec(
+                unit=Unit.M3_PER_S,
+                representations=frozenset({OutputRepresentation.DETERMINISTIC}),
+            )
+        },
         dynamic={
-            InputTemporalResolution.DAILY: SpatialInputSpec(
+            timedelta(days=1): SpatialInputSpec(
                 data={
-                    SpatialResolution.LUMPED: DynamicInputSpec(
+                    SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
                         past_known={
-                            "obs": {"q": PastKnownVariable(lookback=1, max_nan=0)}
+                            "obs": {
+                                "q": PastKnownVariable(
+                                    unit=Unit.M3_PER_S,
+                                    lookback=1,
+                                    max_nan=0,
+                                )
+                            }
                         }
                     )
                 }
             )
-        }
+        },
     )
 
 
@@ -182,35 +201,157 @@ class TestModelResult:
 
 
 # ---------------------------------------------------------------------------
-# ForecastModel protocol
+# ArtifactScope
 # ---------------------------------------------------------------------------
+
+
+class TestArtifactScope:
+    def test_member_count(self) -> None:
+        assert len(ArtifactScope) == 2
+
+    def test_members_exist(self) -> None:
+        assert ArtifactScope.STATION is not None
+        assert ArtifactScope.GROUP is not None
+
+
+# ---------------------------------------------------------------------------
+# TrainedArtifact (opaque marker Protocol)
+# ---------------------------------------------------------------------------
+
+
+class TestTrainedArtifact:
+    def test_any_object_satisfies_marker_protocol(self) -> None:
+        # TrainedArtifact is an opaque marker Protocol with no members, so any
+        # object satisfies it via isinstance.
+        assert isinstance(object(), TrainedArtifact)
+
+
+# ---------------------------------------------------------------------------
+# ForecastModel / RetrainableModel protocols
+# ---------------------------------------------------------------------------
+
+
+class _ConformingModel:
+    artifact_scope = ArtifactScope.STATION
+
+    @property
+    def input_requirement(self) -> InputRequirement:
+        return _make_input_requirement()
+
+    def train(
+        self, inputs: ModelInputs, *, config: Any, rng: Random
+    ) -> TrainedArtifact:
+        return object()
+
+    def predict(
+        self,
+        artifact: TrainedArtifact,
+        *,
+        inputs: ModelInputs,
+        issue_datetime: datetime,
+        rng: Random,
+    ) -> ModelResult:
+        return ModelSuccess(output=_make_model_output())
+
+    def serialize_artifact(self, artifact: TrainedArtifact) -> bytes:
+        return b""
+
+    def deserialize_artifact(self, raw: bytes) -> TrainedArtifact:
+        return object()
+
+
+class _BatchHindcastModel(_ConformingModel):
+    def hindcast(
+        self,
+        artifact: TrainedArtifact,
+        *,
+        inputs: ModelInputs,
+        issue_datetimes: Sequence[datetime],
+        rng: Random,
+    ) -> ModelResult:
+        return ModelSuccess(output=_make_model_output())
+
+
+class _RetrainableModel(_ConformingModel):
+    def retrain(
+        self,
+        base_artifact: TrainedArtifact,
+        inputs: ModelInputs,
+        *,
+        config: Any,
+        rng: Random,
+    ) -> TrainedArtifact:
+        return object()
 
 
 class TestForecastModel:
     def test_conforming_class_satisfies_protocol(self) -> None:
-        class _ConformingModel:
+        assert isinstance(_ConformingModel(), ForecastModel)
+
+    def test_missing_train_fails_protocol(self) -> None:
+        class _NoTrain:
+            artifact_scope = ArtifactScope.STATION
+
             @property
             def input_requirement(self) -> InputRequirement:
                 return _make_input_requirement()
 
             def predict(
-                self, *, inputs: Any, issue_datetime: datetime
-            ) -> ModelResult: ...
+                self,
+                artifact: TrainedArtifact,
+                *,
+                inputs: ModelInputs,
+                issue_datetime: datetime,
+                rng: Random,
+            ) -> ModelResult:
+                raise NotImplementedError
 
-            def hindcast(
-                self, *, inputs: Any, issue_datetime: datetime
-            ) -> ModelResult: ...
+            def serialize_artifact(self, artifact: TrainedArtifact) -> bytes:
+                raise NotImplementedError
 
-        assert isinstance(_ConformingModel(), ForecastModel)
+            def deserialize_artifact(self, raw: bytes) -> TrainedArtifact: ...
 
-    def test_missing_predict_fails_protocol(self) -> None:
-        class _Incomplete:
+        assert not isinstance(_NoTrain(), ForecastModel)
+
+    def test_missing_serialize_fails_protocol(self) -> None:
+        class _NoSerialize:
+            artifact_scope = ArtifactScope.STATION
+
             @property
             def input_requirement(self) -> InputRequirement:
                 return _make_input_requirement()
 
-            def hindcast(
-                self, *, inputs: Any, issue_datetime: datetime
-            ) -> ModelResult: ...
+            def train(
+                self, inputs: ModelInputs, *, config: Any, rng: Random
+            ) -> TrainedArtifact: ...
 
-        assert not isinstance(_Incomplete(), ForecastModel)
+            def predict(
+                self,
+                artifact: TrainedArtifact,
+                *,
+                inputs: ModelInputs,
+                issue_datetime: datetime,
+                rng: Random,
+            ) -> ModelResult:
+                raise NotImplementedError
+
+            def deserialize_artifact(self, raw: bytes) -> TrainedArtifact: ...
+
+        assert not isinstance(_NoSerialize(), ForecastModel)
+
+    def test_conforming_without_retrain_is_not_retrainable(self) -> None:
+        model = _ConformingModel()
+        assert isinstance(model, ForecastModel)
+        assert not isinstance(model, RetrainableModel)
+        assert not isinstance(model, BatchHindcastModel)
+
+    def test_model_with_retrain_satisfies_both(self) -> None:
+        model = _RetrainableModel()
+        assert isinstance(model, ForecastModel)
+        assert isinstance(model, RetrainableModel)
+        assert not isinstance(model, BatchHindcastModel)
+
+    def test_batch_hindcast_model_satisfies_batch_protocol(self) -> None:
+        model = _BatchHindcastModel()
+        assert isinstance(model, BatchHindcastModel)
+        assert isinstance(model, ForecastModel)

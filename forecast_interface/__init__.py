@@ -1,18 +1,32 @@
+__version__ = "0.1.17"
+
+from .common import AggregationMethod
 from .input import (
+    DynamicInputs,
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
     InputRequirement,
+    InputSeries,
+    ModelInputs,
+    OutputRepresentation,
     PastKnownVariable,
+    SpatialInputs,
     SpatialInputSpec,
-    SpatialResolution,
+    SpatialRepresentation,
+    StationInputs,
+    TargetSpec,
 )
 from .interface import (
+    ArtifactScope,
+    BatchHindcastModel,
     FailureCause,
     ForecastModel,
     ModelFailure,
     ModelResult,
     ModelSuccess,
+    RetrainableModel,
+    TrainedArtifact,
 )
 from .output import (
     DeterministicData,
@@ -20,7 +34,6 @@ from .output import (
     ForecastFlag,
     ModelOutput,
     QuantileData,
-    TemporalResolution,
     TrajectoryData,
     Unit,
     VariableMetadata,
@@ -29,7 +42,11 @@ from .output import (
 )
 
 __all__ = [
+    "AggregationMethod",
+    "ArtifactScope",
+    "BatchHindcastModel",
     "DeterministicData",
+    "DynamicInputs",
     "DynamicInputSpec",
     "EnsembleMode",
     "EpistemicUncertaintyData",
@@ -38,15 +55,22 @@ __all__ = [
     "ForecastModel",
     "FutureKnownVariable",
     "InputRequirement",
+    "InputSeries",
     "ModelFailure",
+    "ModelInputs",
     "ModelOutput",
     "ModelResult",
     "ModelSuccess",
+    "OutputRepresentation",
     "PastKnownVariable",
     "QuantileData",
+    "RetrainableModel",
+    "SpatialInputs",
     "SpatialInputSpec",
-    "SpatialResolution",
-    "TemporalResolution",
+    "SpatialRepresentation",
+    "StationInputs",
+    "TargetSpec",
+    "TrainedArtifact",
     "TrajectoryData",
     "Unit",
     "VariableMetadata",
