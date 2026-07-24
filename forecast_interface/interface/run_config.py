@@ -2,8 +2,17 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class RunConfig(BaseModel):
+    """Runtime sampling counts for forecast generation and emission.
+
+    num_samples is aleatoric draws per weight. num_weight_samples is epistemic
+    weight draws. The pooled num_weight_samples * num_samples draws are the full
+    predictive distribution. num_trajectories is how many raw paths to emit
+    (<= pool, 0 = none): a retention count, not a generation count.
+    """
+
     quantile_levels: list[float] | None = None
-    num_trajectories: int | None = Field(default=None, gt=0)
+    num_weight_samples: int | None = Field(default=None, gt=0)
+    num_trajectories: int | None = Field(default=None, ge=0)
     num_samples: int | None = Field(default=None, gt=0)
 
     @field_validator("quantile_levels")
