@@ -1,4 +1,4 @@
-__version__ = "0.1.17"
+__version__ = "0.1.18"
 
 from .common import AggregationMethod
 from .input import (
@@ -26,6 +26,7 @@ from .interface import (
     ModelResult,
     ModelSuccess,
     RetrainableModel,
+    RunConfig,
     TrainedArtifact,
 )
 from .output import (
@@ -65,6 +66,7 @@ __all__ = [
     "PastKnownVariable",
     "QuantileData",
     "RetrainableModel",
+    "RunConfig",
     "SpatialInputs",
     "SpatialInputSpec",
     "SpatialRepresentation",

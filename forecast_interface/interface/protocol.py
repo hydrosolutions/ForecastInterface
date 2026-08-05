@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from random import Random
 from typing import Any, Protocol, runtime_checkable
@@ -18,12 +18,11 @@ class ForecastModel(Protocol):
     artifact_scope: ArtifactScope
 
     # REQUIRED training contract — cold full rebuild is the baseline.
+    # `config` is an opaque mapping each model self-validates; `RunConfig`
+    # is FI's generic cross-model subset a model may parse out of it.
     def train(
-        self, inputs: ModelInputs, *, config: Any, rng: Random
+        self, inputs: ModelInputs, *, config: Mapping[str, Any], rng: Random
     ) -> TrainedArtifact: ...
-
-    # ^ PROVISIONAL: `config` model params are co-designed with SAP3 (Q8).
-    #   Typed Any until that contract lands.
 
     def predict(
         self,
@@ -57,11 +56,13 @@ class BatchHindcastModel(ForecastModel, Protocol):
 class RetrainableModel(ForecastModel, Protocol):
     # Warm-start retrain — OPTIONAL. SAP3 checks isinstance(model, RetrainableModel)
     # to know whether warm-start is supported; otherwise it falls back to `train`.
+    # `config` is an opaque mapping each model self-validates; `RunConfig`
+    # is FI's generic cross-model subset a model may parse out of it.
     def retrain(
         self,
         base_artifact: TrainedArtifact,
         inputs: ModelInputs,
         *,
-        config: Any,  # PROVISIONAL: model params are co-designed with SAP3 (Q8).
+        config: Mapping[str, Any],
         rng: Random,
     ) -> TrainedArtifact: ...
