@@ -72,9 +72,10 @@ class TestAggregationMethod:
     def test_members_exist(self) -> None:
         assert AggregationMethod.SUM.value == "sum"
         assert AggregationMethod.MEAN.value == "mean"
+        assert AggregationMethod.MAX.value == "max"
 
     def test_member_count(self) -> None:
-        assert len(AggregationMethod) == 2
+        assert len(AggregationMethod) == 3
 
 
 class TestVariableStatus:

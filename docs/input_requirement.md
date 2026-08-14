@@ -100,7 +100,7 @@ Each variable declares the following properties:
 | `max_nan`      | `int`  | both          | The model's **tolerance**: max NaNs it can cope with in the series (must be >= 0). **SAP3 enforces this as a pre-`predict` gate** — if exceeded, the model is not called and the station is failed (`DATA_AVAILABILITY`); within tolerance, residual NaNs are delivered **as-is** for the model to handle (decision 1.13). |
 | `ensemble_mode`| `EnsembleMode` | future_known  | Whether ensemble or single traces are needed (`single` or `ensemble`, default: `single`) |
 | `unit`         | `Unit` | both          | **Required.** The physical unit the model expects this variable in (e.g. `Unit.MM_PER_DAY`). The delivered series is tagged with its unit and delivered **in the declared unit, or rejected loudly at integration** — no data without units. (Automatic unit conversion is a future adapter feature.) |
-| `aggregation`  | `AggregationMethod \| None` | both | **Optional.** `SUM` or `MEAN`, used when the declared resolution is coarser than the delivered data. Defaults to the per-parameter convention (precipitation / reference_et = `SUM`; state variables = `MEAN`); declare only to override. |
+| `aggregation`  | `AggregationMethod \| None` | both | **Optional.** `SUM`, `MEAN` or `MAX`, used when the declared resolution is coarser than the delivered data. Defaults to the per-parameter convention (precipitation / reference_et = `SUM`; state variables = `MEAN`); declare only to override. |
 
 ---
 
@@ -112,7 +112,7 @@ These three are a single coherent concern (mirroring SAP3's `ParameterDefinition
 
 **Units.** Every input variable declares the `unit` it expects (see properties table); outputs declare units via `TargetSpec` / `VariableMetadata`. The `Unit` enum must cover every parameter's unit and is a **sync contract with SAP3's `ParameterDefinition` units** — extended as needed (current additions for forcing: `PERCENT`, `M_PER_S`, `DEGREE`, `W_PER_M2`, `MM_PER_HOUR`).
 
-**Aggregation.** When a model declares a variable at a resolution coarser than the delivered data, SAP3 aggregates with `SUM` or `MEAN`. Default follows the per-parameter convention (precipitation / reference_et = `SUM`; temperature, discharge, SWE and other state variables = `MEAN`); override via the optional `aggregation` property only for a non-default rule.
+**Aggregation.** When a model declares a variable at a resolution coarser than the delivered data, SAP3 aggregates with `SUM`, `MEAN` or `MAX` (`MAX` for peak channels, e.g. a window-max discharge a flood threshold is set on). Default follows the per-parameter convention (precipitation / reference_et = `SUM`; temperature, discharge, SWE and other state variables = `MEAN`); override via the optional `aggregation` property only for a non-default rule.
 
 ## Static Inputs
 
