@@ -1,4 +1,4 @@
-__version__ = "0.1.19"
+__version__ = "0.1.20"
 
 from .common import AggregationMethod
 from .input import (
@@ -6,6 +6,7 @@ from .input import (
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
+    HorizonSemantics,
     InputRequirement,
     InputSeries,
     ModelInputs,
@@ -55,6 +56,7 @@ __all__ = [
     "ForecastFlag",
     "ForecastModel",
     "FutureKnownVariable",
+    "HorizonSemantics",
     "InputRequirement",
     "InputSeries",
     "ModelFailure",

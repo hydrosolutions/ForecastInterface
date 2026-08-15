@@ -9,6 +9,7 @@ from forecast_interface.input import (
     DynamicInputSpec,
     EnsembleMode,
     FutureKnownVariable,
+    HorizonSemantics,
     InputRequirement,
     OutputRepresentation,
     PastKnownVariable,
@@ -114,6 +115,96 @@ class TestFutureKnownVariable:
     def test_max_nan_negative(self) -> None:
         with pytest.raises(ValidationError, match="max_nan must be non-negative"):
             FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=1, max_nan=-1)
+
+
+class TestHorizonSemantics:
+    def test_members(self) -> None:
+        assert HorizonSemantics.EXACT.value == "exact"
+        assert HorizonSemantics.AT_MOST.value == "at_most"
+
+    def test_default_is_exact(self) -> None:
+        v = FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=15, max_nan=0)
+        assert v.horizon_semantics == HorizonSemantics.EXACT
+        assert v.min_future_steps is None
+
+    def test_at_most_with_floor(self) -> None:
+        v = FutureKnownVariable(
+            unit=Unit.MM_PER_DAY,
+            future_steps=15,
+            max_nan=0,
+            horizon_semantics=HorizonSemantics.AT_MOST,
+            min_future_steps=5,
+        )
+        assert v.horizon_semantics == HorizonSemantics.AT_MOST
+        assert v.min_future_steps == 5
+
+    def test_at_most_floor_may_equal_future_steps(self) -> None:
+        v = FutureKnownVariable(
+            unit=Unit.M3_PER_S,
+            future_steps=15,
+            max_nan=0,
+            horizon_semantics=HorizonSemantics.AT_MOST,
+            min_future_steps=15,
+        )
+        assert v.min_future_steps == 15
+
+    def test_at_most_requires_floor(self) -> None:
+        with pytest.raises(ValidationError, match="min_future_steps is required"):
+            FutureKnownVariable(
+                unit=Unit.M3_PER_S,
+                future_steps=15,
+                max_nan=0,
+                horizon_semantics=HorizonSemantics.AT_MOST,
+            )
+
+    def test_exact_rejects_floor(self) -> None:
+        with pytest.raises(ValidationError, match="only meaningful when"):
+            FutureKnownVariable(
+                unit=Unit.M3_PER_S,
+                future_steps=15,
+                max_nan=0,
+                min_future_steps=5,
+            )
+
+    def test_floor_must_be_positive(self) -> None:
+        with pytest.raises(ValidationError, match="min_future_steps must be positive"):
+            FutureKnownVariable(
+                unit=Unit.M3_PER_S,
+                future_steps=15,
+                max_nan=0,
+                horizon_semantics=HorizonSemantics.AT_MOST,
+                min_future_steps=0,
+            )
+
+    def test_floor_must_not_exceed_future_steps(self) -> None:
+        with pytest.raises(ValidationError, match="must not exceed future_steps"):
+            FutureKnownVariable(
+                unit=Unit.M3_PER_S,
+                future_steps=5,
+                max_nan=0,
+                horizon_semantics=HorizonSemantics.AT_MOST,
+                min_future_steps=6,
+            )
+
+    def test_assignment_cannot_strand_semantics_without_floor(self) -> None:
+        v = FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=15, max_nan=0)
+        with pytest.raises(ValidationError, match="min_future_steps is required"):
+            v.horizon_semantics = HorizonSemantics.AT_MOST
+
+    def test_assignment_cannot_add_floor_under_exact(self) -> None:
+        v = FutureKnownVariable(unit=Unit.M3_PER_S, future_steps=15, max_nan=0)
+        with pytest.raises(ValidationError, match="only meaningful when"):
+            v.min_future_steps = 5
+
+    def test_round_trips_through_serialization(self) -> None:
+        v = FutureKnownVariable(
+            unit=Unit.M3_PER_S,
+            future_steps=15,
+            max_nan=0,
+            horizon_semantics=HorizonSemantics.AT_MOST,
+            min_future_steps=5,
+        )
+        assert FutureKnownVariable.model_validate(v.model_dump()) == v
 
 
 # ---------------------------------------------------------------------------
