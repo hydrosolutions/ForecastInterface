@@ -14,7 +14,12 @@ from .requirement import (
     SpatialInputSpec,
 )
 from .target import OutputRepresentation, TargetSpec
-from .variable import EnsembleMode, FutureKnownVariable, PastKnownVariable
+from .variable import (
+    EnsembleMode,
+    FutureKnownVariable,
+    HorizonSemantics,
+    PastKnownVariable,
+)
 
 __all__ = [
     "AggregationMethod",
@@ -22,6 +27,7 @@ __all__ = [
     "DynamicInputSpec",
     "EnsembleMode",
     "FutureKnownVariable",
+    "HorizonSemantics",
     "InputRequirement",
     "InputSeries",
     "ModelInputs",

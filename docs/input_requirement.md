@@ -96,11 +96,66 @@ Each variable declares the following properties:
 | Property       | Type   | Applies to    | Description                                                  |
 |----------------|--------|---------------|--------------------------------------------------------------|
 | `lookback`     | `int`  | past_known    | Number of past time steps required (must be > 0)             |
-| `future_steps` | `int`  | future_known  | Number of future time steps required (must be > 0)           |
+| `future_steps` | `int`  | future_known  | Number of future time steps (must be > 0). Read as a floor or a ceiling according to `horizon_semantics` — see [Horizon semantics](#horizon-semantics). |
+| `horizon_semantics` | `HorizonSemantics` | future_known | Whether `future_steps` is a hard requirement (`exact`, the default) or a maximum (`at_most`). |
+| `min_future_steps` | `int \| None` | future_known | The floor under `at_most`: **required** when `horizon_semantics` is `at_most`, and rejected otherwise. Must satisfy `0 < min_future_steps <= future_steps`. |
 | `max_nan`      | `int`  | both          | The model's **tolerance**: max NaNs it can cope with in the series (must be >= 0). **SAP3 enforces this as a pre-`predict` gate** — if exceeded, the model is not called and the station is failed (`DATA_AVAILABILITY`); within tolerance, residual NaNs are delivered **as-is** for the model to handle (decision 1.13). |
 | `ensemble_mode`| `EnsembleMode` | future_known  | Whether ensemble or single traces are needed (`single` or `ensemble`, default: `single`) |
 | `unit`         | `Unit` | both          | **Required.** The physical unit the model expects this variable in (e.g. `Unit.MM_PER_DAY`). The delivered series is tagged with its unit and delivered **in the declared unit, or rejected loudly at integration** — no data without units. (Automatic unit conversion is a future adapter feature.) |
 | `aggregation`  | `AggregationMethod \| None` | both | **Optional.** `SUM`, `MEAN` or `MAX`, used when the declared resolution is coarser than the delivered data. Defaults to the per-parameter convention (precipitation / reference_et = `SUM`; state variables = `MEAN`); declare only to override. |
+
+### Horizon semantics
+
+`future_steps` alone cannot say whether a model *requires* that many future steps or merely *can use*
+that many. Both readings occur in practice, and a provider that guesses wrong either refuses to run a
+model that would have worked or hands a short input to a model that needs its full horizon. The
+variable therefore states its own semantics:
+
+```python
+class HorizonSemantics(Enum):
+    EXACT = "exact"      # future_steps is a floor: fewer is an error
+    AT_MOST = "at_most"  # future_steps is a ceiling: fewer yields a shorter forecast
+```
+
+- **`exact`** — the default, and the meaning every declaration had before this field existed. Fewer
+  than `future_steps` delivered steps is a data-availability failure; the model is not called.
+- **`at_most`** — the model degrades gracefully. Any count in `[min_future_steps, future_steps]` is
+  acceptable and produces a correspondingly shorter forecast. Below `min_future_steps` the provider
+  refuses, exactly as under `exact`.
+
+Two rules bind a short delivery:
+
+1. **A short delivery is a shorter series, not a NaN-padded full-length one.** The undelivered steps
+   are not counted against `max_nan`, which continues to gate only NaNs *within* the delivered
+   extent. Padding a fixed-length frame with a trailing NaN block is a contract violation.
+2. **The delivered steps are the contiguous prefix** beginning at the first future step. `at_most`
+   licenses a short tail — never a leading or interior gap.
+
+`min_future_steps` is mandatory under `at_most` because "fewer is fine" is rarely unbounded: a
+15-day model may be useless at 1 day. Requiring the floor keeps that judgement with the model, which
+is the only party that knows it.
+
+Semantics are declared **per variable**, not per model: a model may need one forcing in full while
+tolerating truncation in another, and the same model may tolerate truncation only in some
+configurations. The horizon the model actually produces is still the model's own to compute and
+declare in `metadata.forecast_horizon` — this field only tells a provider how much forcing is
+useful, and how little is still enough.
+
+```python
+FutureKnownVariable(
+    future_steps=15,                              # trained maximum
+    min_future_steps=5,                           # below this, do not call the model
+    horizon_semantics=HorizonSemantics.AT_MOST,
+    max_nan=0,
+    unit=Unit.MM_PER_DAY,
+)
+```
+
+Under this declaration a provider with a 120 h (5-day) NWP feed is permitted to invoke the model and
+receives a 5-day forecast, where an `exact` declaration would oblige it to refuse. The contract
+grants the permission; **acting on it is provider-side work** — a provider that does not yet read
+`horizon_semantics` keeps applying `future_steps` as a floor, which stays correct, just no less
+strict than before.
 
 ---
 
@@ -150,12 +205,14 @@ dynamic:
         future_known:
           ECMWF:
             precipitation:
-              future_steps: 15
+              future_steps: 15          # ceiling: a 5-day feed still yields a 5-day forecast
+              min_future_steps: 5
+              horizon_semantics: at_most
               max_nan: 0
               ensemble_mode: ensemble
               unit: "mm/day"
             temperature:
-              future_steps: 15
+              future_steps: 15          # no horizon_semantics -> exact, all 15 steps required
               max_nan: 0
               ensemble_mode: single
               unit: "°C"

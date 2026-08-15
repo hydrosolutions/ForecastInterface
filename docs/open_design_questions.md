@@ -119,6 +119,68 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Reflected in:** `docs/model_interface.md`.
 
+## 1.16 `future_steps` semantics: floor vs. ceiling — RESOLVED
+
+**Decision:** the requirement states its own semantics. `FutureKnownVariable` gains a
+`horizon_semantics: HorizonSemantics` field (`EXACT` | `AT_MOST`, **default `EXACT`**) and a
+`min_future_steps: int | None`, **required when — and only when — `AT_MOST`**.
+
+- **`EXACT`** (default) — `future_steps` is a floor: fewer delivered steps is an error, and the
+  provider must not call the model. Identical to today's behaviour, so no existing declaration
+  changes meaning and no provider starts truncating silently after an upgrade.
+- **`AT_MOST`** — `future_steps` is a ceiling: any count in `[min_future_steps, future_steps]` is
+  acceptable and yields a correspondingly shorter forecast. Below the floor, the provider must
+  refuse as under `EXACT`.
+- **A short delivery is a genuinely shorter series, not a full-length one padded with NaN.** The
+  undelivered steps are *not* counted against `max_nan` — `max_nan` (decision 1.13) continues to
+  gate only NaNs *within* the delivered extent. Padding a fixed-length frame with a trailing NaN
+  block is a contract violation, not an `AT_MOST` delivery.
+- The delivered steps are the **contiguous prefix** starting at the first future step; `AT_MOST`
+  licenses a short tail, never an interior or leading gap.
+- The floor is **mandatory** under `AT_MOST` because "fewer is fine" is rarely unbounded — a 15-day
+  model may be useless at 1 day. Optional would put that judgement back with each provider, which is
+  the coordination failure this change exists to remove.
+
+**Rationale:** raised by SAP3 as FI issue 002. `future_steps` had two incompatible readings in the
+wild with no way to tell them apart: aquacast declares its **trained maximum** and degrades
+gracefully below it (`_relax_horizon`), while SAP3 reads the same field as a **hard requirement** and
+refuses to invoke a model whose future forcing is short. Both are correct against the contract as
+written; the contract was the problem. Concretely it blocked Swiss stations, where ICON-CH2-EPS
+publishes 120 h against a 15-day declared horizon, so a model that would happily produce a 5-day
+forecast was never called.
+
+**Why variable-level, not model-level:** a model may need one forcing in full while tolerating
+truncation in another, and the same model tolerates truncation only for some configurations —
+aquacast's `_relax_horizon` refuses to shrink a multi-resolution window unless
+`forecast_hours == forecast_days * 24`. Semantics therefore belong where `future_steps` already
+lives.
+
+**Relation to 1.15:** this does **not** move horizon ownership. The model still owns the horizon and
+declares the *actual* one in `metadata.forecast_horizon`; `future_steps` stays forcing extent. What
+is added is only whether that extent is a floor or a ceiling — the narrowest form of the
+horizon-*capability* field 1.15 deferred as YAGNI, now driven by a concrete blocking case.
+
+**Relation to Q9 (availability lag):** unchanged. A *systematically* shorter product still declares
+a smaller `future_steps` (e.g. SnowMapper SWE 13 vs ECMWF precip 15). `AT_MOST` covers the different
+case where the delivered extent varies per run with the upstream feed.
+
+**Alternatives rejected:** a separate `max_future_steps` alongside `future_steps` (equal expressive
+power, but invites inconsistent pairs and leaves `future_steps` itself ambiguous); a model-level flag
+(too coarse, see above); documentation only (the status quo, which produced two correct
+implementations that cannot interoperate).
+
+**Adoption (cross-repo, not carried by this change):** the FI type is implemented; the behaviour it
+licenses is not yet live on either side. aquacast must declare `AT_MOST` plus a floor where
+`_relax_horizon` actually applies (it refuses to shrink some window geometries, so some
+configurations stay `EXACT`). SAP3 must read both fields — today its adapter collapses the
+requirement to `max(future_steps)` across variables and gates every future feature on that single
+maximum, so an `AT_MOST` declaration changes nothing until that path becomes per-variable. Both pin
+FI exactly (SAP3 additionally enforces `SUPPORTED_FI_VERSION` at run time), so each side adopts on
+its own schedule and a stale consumer keeps today's strict behaviour rather than misreading the new
+one.
+
+**Reflected in:** `docs/input_requirement.md`. *(Implemented in FI; downstream adoption pending.)*
+
 ## 1.15 Forecast horizon ownership & issue context — RESOLVED
 
 **Decision:** the **model owns the forecast horizon** — it is not requested by SAP3.

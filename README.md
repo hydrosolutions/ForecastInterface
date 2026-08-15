@@ -19,7 +19,7 @@ See the [Model Interface Specification](docs/model_interface.md) for the full sc
 
 ## InputRequirement
 
-Declares what data a model needs: forecast `targets`, `dynamic` inputs nested as `timedelta` time step → spatial representation → past/future → product → variable (each with its `unit`, `lookback`/`future_steps`, `max_nan`, and optional `aggregation`), and `static` attributes. At run time the model receives a `ModelInputs` bundle isomorphic to this declaration.
+Declares what data a model needs: forecast `targets`, `dynamic` inputs nested as `timedelta` time step → spatial representation → past/future → product → variable (each with its `unit`, `lookback`/`future_steps`, `max_nan`, optional `aggregation`, and — for future-known variables — `horizon_semantics` declaring whether `future_steps` is a hard requirement or a maximum), and `static` attributes. At run time the model receives a `ModelInputs` bundle isomorphic to this declaration.
 
 See the [Input Requirement Specification](docs/input_requirement.md) for the full structure and examples.
 
