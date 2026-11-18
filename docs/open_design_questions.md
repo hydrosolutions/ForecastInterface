@@ -130,6 +130,12 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Rationale:** raised as FI issue #12 (https://github.com/hydrosolutions/ForecastInterface/issues/12). A model trained on daily means stamped at one phase silently degrades when fed the same step at another. Origin alone is not enough: the same physical day is stamped 18:00Z on its start or on its end, both 18:00 mod 24h, so a label is required to tell `START` from `END`.
 
+**Limitations.**
+
+- `ModelInputs.grid` checks only the branch keyed by `grid.step`; branches with other steps are not checked, and an unknown grid is not checked. A `TimeGrid` that matches no station's branch at all now raises (a wiring error); stations that individually lack the branch are skipped while at least one has it.
+- A `POINT` variable ignores the inherited branch label (the branch label applies to its windowed variables).
+- A step that does not divide 24 h is accepted while the origin is `Unknown`, but rejected once an origin is declared, so declaring a grid later can fail on such a step; otherwise the change is additive.
+
 **Bounded, deliberate difference.** Civil midnight in a UTC+5:45 zone is 18:15Z the previous day, but deployments declare 18:00Z. That 15-minute approximation is accepted as a deliberate, bounded difference, and exact equality refuses it: data imported on 18:15Z is a `MISMATCH` against an 18:00Z declaration, and an orchestrator must resolve it explicitly (re-stamp or retrain). FI does not tolerate or shift.
 
 **Scope limits.**

@@ -1,4 +1,4 @@
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from .common import (
     AggregationMethod,
@@ -43,6 +43,7 @@ from .interface import (
     RunConfig,
     TrainedArtifact,
     artifact_training_grid,
+    grid_mismatch_failure,
 )
 from .output import (
     DeterministicData,
@@ -72,6 +73,7 @@ __all__ = [
     "ArtifactScope",
     "GridDeclaringArtifact",
     "artifact_training_grid",
+    "grid_mismatch_failure",
     "BatchHindcastModel",
     "DeterministicData",
     "DynamicInputs",

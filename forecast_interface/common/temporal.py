@@ -27,11 +27,10 @@ def validate_on_grid(
     # A value is on the grid when (epoch - origin) is a whole multiple of step.
     step_ns = exact_nanoseconds(step)
     origin_ns = exact_nanoseconds(origin)
-    off = values.dt.epoch("ns").filter(
-        (values.dt.epoch("ns") - origin_ns) % step_ns != 0
-    )
-    if off.len():
-        offender = values.filter((values.dt.epoch("ns") - origin_ns) % step_ns != 0)[0]
+    epoch = values.dt.epoch("ns")
+    off_grid = (epoch - origin_ns) % step_ns != 0
+    if off_grid.any():
+        offender = values.filter(off_grid)[0]
         raise ValueError(
             f"'{name}' value {offender} is off the declared grid "
             f"(step {step}, origin {origin} from UTC midnight)"

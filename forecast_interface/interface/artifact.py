@@ -36,14 +36,17 @@ class GridDeclaringArtifact(TrainedArtifact, Protocol):
 def artifact_training_grid(artifact: TrainedArtifact) -> TrainingGridDeclaration:
     unknown = TrainingGridDeclaration(grid=Unknown.UNKNOWN)
     try:
-        if not isinstance(artifact, GridDeclaringArtifact):
-            return unknown
-        declaration = artifact.training_grid
-    except Exception as exc:
-        logger.debug("training_grid unreadable on %r: %s", type(artifact), exc)
+        declaration = getattr(artifact, "training_grid")
+    except AttributeError:
+        logger.debug("%r declares no training_grid (legacy artifact)", type(artifact))
+        return unknown
+    except Exception:
+        logger.warning(
+            "training_grid getter raised on %r", type(artifact), exc_info=True
+        )
         return unknown
     if not isinstance(declaration, TrainingGridDeclaration):
-        logger.debug(
+        logger.warning(
             "training_grid on %r is not a TrainingGridDeclaration: %r",
             type(artifact),
             declaration,

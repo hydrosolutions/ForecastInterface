@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from random import Random
@@ -7,7 +8,12 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from forecast_interface.common import PeriodLabel, TimeGrid, TrainingGridDeclaration
+from forecast_interface.common import (
+    GridMismatchError,
+    PeriodLabel,
+    TimeGrid,
+    TrainingGridDeclaration,
+)
 from forecast_interface.input import (
     DynamicInputSpec,
     InputRequirement,
@@ -30,6 +36,7 @@ from forecast_interface.interface import (
     RetrainableModel,
     TrainedArtifact,
     artifact_training_grid,
+    grid_mismatch_failure,
 )
 from forecast_interface.output import (
     DeterministicData,
@@ -432,6 +439,17 @@ class _ReturningArtifact:
         return self._value
 
 
+class _CountingArtifact:
+    def __init__(self, declaration: TrainingGridDeclaration) -> None:
+        self._declaration = declaration
+        self.reads = 0
+
+    @property
+    def training_grid(self) -> TrainingGridDeclaration:
+        self.reads += 1
+        return self._declaration
+
+
 _GRID = TimeGrid(step=timedelta(hours=1), origin=timedelta(0), label=PeriodLabel.START)
 _UNKNOWN = TrainingGridDeclaration()
 
@@ -452,23 +470,48 @@ class TestArtifactTrainingGrid:
         declaration = TrainingGridDeclaration(grid=_GRID)
         assert artifact_training_grid(_GridArtifact(declaration)) == declaration
 
-    def test_attribute_error_reads_as_unknown(self) -> None:
-        assert artifact_training_grid(_AttributeErrorArtifact()) == _UNKNOWN
+    def test_attribute_error_reads_as_unknown_quietly(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            result = artifact_training_grid(_AttributeErrorArtifact())
+        assert result == _UNKNOWN
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
-    def test_runtime_error_reads_as_unknown(self) -> None:
-        assert artifact_training_grid(_RuntimeErrorArtifact()) == _UNKNOWN
+    def test_getter_runtime_error_warns_and_reads_as_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            result = artifact_training_grid(_RuntimeErrorArtifact())
+        assert result == _UNKNOWN
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].exc_info is not None
+        assert "boom" in str(warnings[0].exc_info[1])
 
-    def test_value_error_reads_as_unknown(self) -> None:
-        assert artifact_training_grid(_RaisingArtifact(ValueError("bad"))) == _UNKNOWN
+    def test_getter_key_error_warns_and_reads_as_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            result = artifact_training_grid(_RaisingArtifact(KeyError("k")))
+        assert result == _UNKNOWN
+        assert [r for r in caplog.records if r.levelno == logging.WARNING]
 
-    def test_key_error_reads_as_unknown(self) -> None:
-        assert artifact_training_grid(_RaisingArtifact(KeyError("k"))) == _UNKNOWN
-
-    def test_non_declaration_int_reads_as_unknown(self) -> None:
-        assert artifact_training_grid(_ReturningArtifact(5)) == _UNKNOWN
+    def test_non_declaration_warns_and_reads_as_unknown(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            result = artifact_training_grid(_ReturningArtifact(5))
+        assert result == _UNKNOWN
+        assert [r for r in caplog.records if r.levelno == logging.WARNING]
 
     def test_none_reads_as_unknown(self) -> None:
         assert artifact_training_grid(_ReturningArtifact(None)) == _UNKNOWN
+
+    def test_property_is_read_exactly_once(self) -> None:
+        artifact = _CountingArtifact(TrainingGridDeclaration(grid=_GRID))
+        artifact_training_grid(artifact)
+        assert artifact.reads == 1
 
 
 class TestGridDeclaringArtifact:
@@ -507,3 +550,28 @@ class TestGridMismatchFailure:
             message="grid differs",
         )
         assert failure.cause is FailureCause.GRID_MISMATCH
+
+
+class TestGridMismatchFailureHelper:
+    def _error(self) -> GridMismatchError:
+        other = TimeGrid(timedelta(hours=1), timedelta(minutes=30), PeriodLabel.START)
+        return GridMismatchError(("origin",), _GRID, other)
+
+    def test_builds_grid_mismatch_failure(self) -> None:
+        failure = grid_mismatch_failure(
+            self._error(), model_name="m", issue_datetime=_ISSUE_DT
+        )
+        assert failure.cause is FailureCause.GRID_MISMATCH
+        assert failure.model_name == "m"
+        assert failure.issue_datetime == _ISSUE_DT
+
+    def test_message_is_error_text(self) -> None:
+        error = self._error()
+        failure = grid_mismatch_failure(error, model_name="m", issue_datetime=_ISSUE_DT)
+        assert failure.message == str(error)
+
+    def test_rejects_empty_model_name(self) -> None:
+        with pytest.raises(ValidationError, match="model_name"):
+            grid_mismatch_failure(
+                self._error(), model_name="", issue_datetime=_ISSUE_DT
+            )

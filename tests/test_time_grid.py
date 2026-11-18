@@ -104,6 +104,27 @@ class TestTimeGrid:
         with pytest.raises(AttributeError):
             _grid().step = H  # type: ignore[misc]
 
+    def test_replace_with_invalid_step_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="divide 24 hours"):
+            _grid()._replace(step=7 * H)
+
+    def test_replace_with_invalid_origin_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="origin"):
+            _grid(step=H)._replace(origin=2 * H)
+
+    def test_replace_with_valid_change_works(self) -> None:
+        replaced = _grid()._replace(label=PeriodLabel.END)
+        assert replaced == _grid(label=PeriodLabel.END)
+        assert isinstance(replaced, TimeGrid)
+
+    def test_make_with_invalid_values_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="divide 24 hours"):
+            TimeGrid._make([7 * H, timedelta(0), PeriodLabel.START])
+
+    def test_make_with_valid_values_works(self) -> None:
+        made = TimeGrid._make([H, timedelta(0), PeriodLabel.START])
+        assert made == _grid(step=H, label=PeriodLabel.START)
+
 
 class TestTimeAnchor:
     def test_defaults_are_unknown(self) -> None:

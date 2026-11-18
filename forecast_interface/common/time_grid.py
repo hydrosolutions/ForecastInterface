@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from enum import Enum
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Any, Literal, NamedTuple, TypeAlias
 
 from datetime import timedelta
 
@@ -51,6 +52,14 @@ class TimeGrid(_TimeGridFields):
         if not timedelta(0) <= origin < step:
             raise ValueError(f"origin must satisfy 0 <= origin < step, got {origin}")
         return super().__new__(cls, step, origin, label)
+
+    def _replace(self, **kwargs: Any) -> "TimeGrid":
+        fields = {**self._asdict(), **kwargs}
+        return TimeGrid(**fields)
+
+    @classmethod
+    def _make(cls, iterable: Iterable[Any]) -> "TimeGrid":  # type: ignore[override]
+        return cls(*iterable)
 
 
 GridDeclaration: TypeAlias = TimeGrid | Unknown

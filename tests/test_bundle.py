@@ -337,20 +337,26 @@ class TestExports:
         assert StationInputs is not None
 
 
-def _inputs_at(times: list[datetime], step: timedelta, grid: object) -> ModelInputs:
+def _spatial_at(times: list[datetime]) -> SpatialInputs:
     series = InputSeries(
         unit=Unit.M3_PER_S,
         data=pl.DataFrame({"datetime": times, "value": [1.0] * len(times)}),
     )
-    spatial = SpatialInputs(
+    return SpatialInputs(
         data={
             SpatialRepresentation.BASIN_AVERAGE: DynamicInputs(
                 past_known={"obs": {"q": series}}
             )
         }
     )
+
+
+def _inputs_at(times: list[datetime], step: timedelta, grid: object) -> ModelInputs:
     return ModelInputs.model_validate(
-        {"stations": {"s1": StationInputs(dynamic={step: spatial})}, "grid": grid}
+        {
+            "stations": {"s1": StationInputs(dynamic={step: _spatial_at(times)})},
+            "grid": grid,
+        }
     )
 
 
@@ -377,8 +383,38 @@ class TestModelInputsGrid:
 
     def test_branch_with_other_step_not_checked(self) -> None:
         grid = TimeGrid(DAILY, timedelta(hours=18), PeriodLabel.END)
+        on_grid = [datetime(2024, 1, 1, 18, tzinfo=UTC)]
+        off_grid = [datetime(2024, 1, 1, 7, 15, tzinfo=UTC)]
+        inputs = ModelInputs(
+            stations={
+                "s1": StationInputs(
+                    dynamic={
+                        DAILY: _spatial_at(on_grid),
+                        HOURLY: _spatial_at(off_grid),
+                    }
+                )
+            },
+            grid=grid,
+        )
+        assert inputs.grid == grid
+
+    def test_grid_matching_no_branch_rejected(self) -> None:
+        grid = TimeGrid(DAILY, timedelta(hours=18), PeriodLabel.END)
         times = [datetime(2024, 1, 1, 7, 15, tzinfo=UTC)]
-        _inputs_at(times, HOURLY, grid)
+        with pytest.raises(ValidationError, match="matches no station"):
+            _inputs_at(times, HOURLY, grid)
+
+    def test_station_without_branch_skipped_when_another_has_it(self) -> None:
+        grid = TimeGrid(DAILY, timedelta(hours=18), PeriodLabel.END)
+        on_grid = [datetime(2024, 1, 1, 18, tzinfo=UTC)]
+        inputs = ModelInputs(
+            stations={
+                "s1": StationInputs(dynamic={DAILY: _spatial_at(on_grid)}),
+                "s2": StationInputs(dynamic={HOURLY: _spatial_at(on_grid)}),
+            },
+            grid=grid,
+        )
+        assert inputs.grid == grid
 
     def test_unknown_grid_not_checked(self) -> None:
         times = [datetime(2024, 1, 1, 7, 15, tzinfo=UTC)]

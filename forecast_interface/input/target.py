@@ -11,18 +11,6 @@ class OutputRepresentation(Enum):
     TRAJECTORIES = "trajectories"
 
 
-_RATE_UNITS = frozenset(
-    {
-        Unit.M3_PER_S,
-        Unit.MM_PER_DAY,
-        Unit.MM_PER_S,
-        Unit.M_PER_S,
-        Unit.MM_PER_HOUR,
-        Unit.W_PER_M2,
-    }
-)
-
-
 class TargetSpec(BaseModel):
     unit: Unit
     representations: frozenset[OutputRepresentation]
@@ -36,7 +24,7 @@ class TargetSpec(BaseModel):
             and self.label is not PeriodLabel.UNKNOWN
         ):
             raise ValueError("label is meaningless with POINT aggregation")
-        if self.aggregation is AggregationMethod.SUM and self.unit in _RATE_UNITS:
+        if self.aggregation is AggregationMethod.SUM and self.unit.is_rate:
             raise ValueError(
                 f"SUM aggregation is incompatible with rate unit {self.unit.value}; "
                 "use MEAN or an accumulated unit"

@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Iterator
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -113,18 +114,24 @@ class ModelInputs(BaseModel):
         if not isinstance(self.grid, TimeGrid):
             return self
         grid = self.grid
-        for station_id, station in self.stations.items():
-            spatial = station.dynamic.get(grid.step)
-            if spatial is None:
-                continue
-            for dynamic in spatial.data.values():
-                for group in (dynamic.past_known, dynamic.future_known):
-                    for variable, series_by_name in group.items():
-                        for name, series in series_by_name.items():
-                            validate_on_grid(
-                                series.data["datetime"],
-                                grid.step,
-                                grid.origin,
-                                f"{station_id}/{variable}/{name} datetime",
-                            )
+        if not any(grid.step in station.dynamic for station in self.stations.values()):
+            raise ValueError(
+                f"grid step {grid.step} matches no station's dynamic branch"
+            )
+        for label, series in _branch_series(self.stations, grid.step):
+            validate_on_grid(series.data["datetime"], grid.step, grid.origin, label)
         return self
+
+
+def _branch_series(
+    stations: dict[str, StationInputs], step: datetime.timedelta
+) -> Iterator[tuple[str, InputSeries]]:
+    return (
+        (f"{station_id}/{variable}/{name} datetime", series)
+        for station_id, station in stations.items()
+        if step in station.dynamic
+        for dynamic in station.dynamic[step].data.values()
+        for group in (dynamic.past_known, dynamic.future_known)
+        for variable, series_by_name in group.items()
+        for name, series in series_by_name.items()
+    )

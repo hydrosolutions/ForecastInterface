@@ -179,11 +179,13 @@ A time step alone does not say *which* instants the stamps fall on, nor what a s
 
 Origin alone cannot tell `START` from `END`: the same physical day can be stamped 18:00Z on its start or on its end, both 18:00 mod 24h. Hence the label.
 
-**Per-variable override.** `PastKnownVariable.label` / `FutureKnownVariable.label` override the branch label for that variable (e.g. SUM precipitation stamped `END` beside a `START` temperature). `None` (default) inherits the branch label. Origin is per branch only.
+**Per-variable override.** `PastKnownVariable.label` / `FutureKnownVariable.label` override the branch label for that variable (e.g. SUM precipitation stamped `END` beside a `START` temperature). `None` (default) inherits the branch label. Origin is per branch only. A `POINT` variable ignores the inherited branch label (the branch label applies to its windowed variables).
+
+**Step vs. 24 h.** A step that does not divide 24 h is accepted while the origin is `Unknown`, but rejected once an origin is declared (`TimeGrid` requires it). Declaring a grid later can therefore fail on such a step; otherwise the change is additive.
 
 **`AggregationMethod`** gains `MIN` and `POINT`. `POINT` means the value is sampled at the stamp rather than summarised over a window, so a label is meaningless and is rejected (unless `UNKNOWN`).
 
-**Input side.** `ModelInputs.grid: GridDeclaration` (default `Unknown.UNKNOWN`) is a `TimeGrid(step, origin, label)` or `Unknown`. When it is a `TimeGrid`, every `InputSeries.datetime` on the dynamic branch keyed by `grid.step` must satisfy `(datetime - UTC midnight) mod step == origin`; off-grid stamps are rejected. Branches with other steps, and an unknown grid, are not checked.
+**Input side.** `ModelInputs.grid: GridDeclaration` (default `Unknown.UNKNOWN`) is a `TimeGrid(step, origin, label)` or `Unknown`. When it is a `TimeGrid`, every `InputSeries.datetime` on the dynamic branch keyed by `grid.step` must satisfy `(datetime - UTC midnight) mod step == origin`; off-grid stamps are rejected. A grid whose step matches no station's dynamic branch is a wiring error and raises `ValueError` naming the step; a station that individually lacks that branch is skipped as long as at least one station has it. Branches with other steps, and an unknown grid, are not checked.
 
 Everything is additive: absent declarations read as unknown and behave as before.
 
