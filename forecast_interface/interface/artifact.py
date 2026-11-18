@@ -1,4 +1,9 @@
+import logging
 from typing import Protocol, runtime_checkable
+
+from forecast_interface.common import TrainingGridDeclaration, Unknown
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -20,3 +25,31 @@ class TrainedArtifact(Protocol):
 
     This is a marker Protocol (no members) used as a semantic boundary type.
     """
+
+
+@runtime_checkable
+class GridDeclaringArtifact(TrainedArtifact, Protocol):
+    @property
+    def training_grid(self) -> TrainingGridDeclaration: ...
+
+
+def artifact_training_grid(artifact: TrainedArtifact) -> TrainingGridDeclaration:
+    unknown = TrainingGridDeclaration(grid=Unknown.UNKNOWN)
+    try:
+        declaration = getattr(artifact, "training_grid")
+    except AttributeError:
+        logger.debug("%r declares no training_grid (legacy artifact)", type(artifact))
+        return unknown
+    except Exception:
+        logger.warning(
+            "training_grid getter raised on %r", type(artifact), exc_info=True
+        )
+        return unknown
+    if not isinstance(declaration, TrainingGridDeclaration):
+        logger.warning(
+            "training_grid on %r is not a TrainingGridDeclaration: %r",
+            type(artifact),
+            declaration,
+        )
+        return unknown
+    return declaration

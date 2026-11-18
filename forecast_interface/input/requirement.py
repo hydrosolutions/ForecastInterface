@@ -3,6 +3,7 @@ import datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 from forecast_interface.common.resolutions import SpatialRepresentation
+from forecast_interface.common.time_grid import TimeAnchor, validate_divides_day
 
 from .target import TargetSpec
 from .variable import FutureKnownVariable, PastKnownVariable
@@ -23,6 +24,7 @@ class DynamicInputSpec(BaseModel):
 
 class SpatialInputSpec(BaseModel):
     data: dict[SpatialRepresentation, DynamicInputSpec]
+    anchor: TimeAnchor = TimeAnchor()
 
     @field_validator("data")
     @classmethod
@@ -66,6 +68,24 @@ class InputRequirement(BaseModel):
         for time_step in v:
             if time_step.total_seconds() <= 0:
                 raise ValueError("dynamic time step keys must be positive")
+        return v
+
+    @field_validator("dynamic")
+    @classmethod
+    def _validate_anchor_origins(
+        cls,
+        v: dict[datetime.timedelta, SpatialInputSpec],
+    ) -> dict[datetime.timedelta, SpatialInputSpec]:
+        for time_step, spec in v.items():
+            origin = spec.anchor.origin
+            if not isinstance(origin, datetime.timedelta):
+                continue
+            if not datetime.timedelta(0) <= origin < time_step:
+                raise ValueError(
+                    f"anchor origin {origin} must satisfy 0 <= origin < step "
+                    f"for step {time_step}"
+                )
+            validate_divides_day(time_step, f"step {time_step} with anchor origin")
         return v
 
     @field_validator("static")

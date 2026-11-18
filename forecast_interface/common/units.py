@@ -15,3 +15,19 @@ class Unit(Enum):
     DEGREE = "°"
     W_PER_M2 = "W/m²"
     MM_PER_HOUR = "mm/hour"
+
+    @property
+    def is_rate(self) -> bool:
+        return self in _RATE_UNITS
+
+
+_RATE_UNITS = frozenset(
+    {
+        Unit.M3_PER_S,
+        Unit.MM_PER_DAY,
+        Unit.MM_PER_S,
+        Unit.M_PER_S,
+        Unit.MM_PER_HOUR,
+        Unit.W_PER_M2,
+    }
+)

@@ -1,5 +1,12 @@
 from forecast_interface.common.aggregation import AggregationMethod
 from forecast_interface.common.resolutions import SpatialRepresentation
+from forecast_interface.common.time_grid import (
+    GridDeclaration,
+    PeriodLabel,
+    TimeAnchor,
+    TimeGrid,
+    Unknown,
+)
 
 from .bundle import (
     DynamicInputs,
@@ -19,6 +26,7 @@ from .variable import (
     FutureKnownVariable,
     HorizonSemantics,
     PastKnownVariable,
+    effective_label,
 )
 
 __all__ = [
@@ -27,15 +35,21 @@ __all__ = [
     "DynamicInputSpec",
     "EnsembleMode",
     "FutureKnownVariable",
+    "GridDeclaration",
     "HorizonSemantics",
     "InputRequirement",
     "InputSeries",
     "ModelInputs",
     "OutputRepresentation",
     "PastKnownVariable",
+    "PeriodLabel",
     "SpatialInputs",
     "SpatialInputSpec",
     "SpatialRepresentation",
     "StationInputs",
     "TargetSpec",
+    "TimeAnchor",
+    "TimeGrid",
+    "Unknown",
+    "effective_label",
 ]
