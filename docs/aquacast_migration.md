@@ -5,7 +5,7 @@ For the aquacast model-framework maintainer. This note covers what changes when 
 - **#13** (stacked first): temporal contract, FI issue #9, decision 1.17.
 - **#14** (stacked on #13): training time grid, FI issue #12, decision 1.18.
 
-Neither is released or tagged. Adoption is lockstep with SAP3: both pin FI by exact tag, and SAP3 enforces the pin at run time. We cut one tag after you have confirmed the points in section 4. Until then, nothing here is final.
+Neither is released or tagged. Status: aquacast PR #149 (merged) already makes aquacast emit UTC-aware datetimes and validate cadence per issue group, tested against #13 at bc16dfc, so section 2 is done on the aquacast side apart from re-checking the cases listed there. The production pin stays at v0.1.20 until the shared release. Adoption is lockstep with SAP3: both pin FI by exact tag, and SAP3 enforces the pin at run time. We cut one tag after you have confirmed the points in section 4. Until then, nothing here is final.
 
 Section 2 lists the changes that will make existing code fail. Section 3 lists additions that are optional: a model that ignores them keeps working, and its artifacts are read as `Unknown`. The reasons behind each change are in `docs/open_design_questions.md`, decisions 1.17 and 1.18.
 
@@ -217,7 +217,7 @@ The orchestrator checks that `aggregation` agrees with the target declaration, s
 
 The open checklist for aquacast lives in one place: the **FI issue #12 thread**. Please answer there rather than in this note or by message, so there is a single record. The questions, in the order we need them:
 
-1. **Training contract per variable.** For each variable the model is trained on (discharge, precipitation, temperature, SWE, snowmelt, and so on): the step, the origin (offset from UTC midnight) and the label (`START` or `END`). Is it the same for all of them, or per variable?
+1. **Training contract per variable.** aquacast issue #148 already records a start-label, `[start, end)` convention with the clock set per resolution (daily on gauge-local midnight, subdaily on a UTC grid). Is that what you would embed as the `TrainingGridDeclaration`? Note that a gauge-local daily clock (for example Nepal, UTC+5:45) becomes an `origin` in whole minutes from UTC midnight. For each variable the model is trained on (discharge, precipitation, temperature, SWE, snowmelt, and so on): the step, the origin (offset from UTC midnight) and the label (`START` or `END`). Is it the same for all of them, or per variable?
 2. **Instantaneous or mixed-label inputs.** Which inputs are point values (`POINT`) and which are windowed? Are any labelled differently from the others?
 3. **Non-daily steps.** Does any artifact use 3 h, 6 h or other steps? Do those share one origin?
 4. **Embedding the declaration.** Can your artifacts store a `TrainingGridDeclaration` and return it from a `training_grid` property? If not, how do you want it supplied?
