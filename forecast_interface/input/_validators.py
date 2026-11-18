@@ -1,7 +1,7 @@
 import polars as pl
 
+from forecast_interface.common.temporal import validate_utc_datetime_dtype
 
-DATETIME_DTYPE = pl.Datetime
 NUMERIC_DTYPES = (
     pl.Decimal,
     pl.Float16,
@@ -23,8 +23,7 @@ NUMERIC_DTYPES = (
 def validate_input_series_dataframe(df: pl.DataFrame) -> None:
     if "datetime" not in df.columns:
         raise ValueError("DataFrame must contain a 'datetime' column")
-    if not isinstance(df.schema["datetime"], DATETIME_DTYPE):
-        raise ValueError("'datetime' column must be Datetime")
+    validate_utc_datetime_dtype("datetime", df.schema["datetime"])
     if "issue_datetime" in df.columns:
         raise ValueError("InputSeries data must not contain 'issue_datetime'")
 

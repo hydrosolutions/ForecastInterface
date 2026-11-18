@@ -159,6 +159,12 @@ strict than before.
 
 ---
 
+## Datetimes
+
+The `datetime` column of every `InputSeries` must be a `pl.Datetime` with `time_zone="UTC"`; tz-naive or non-UTC columns are **rejected** (decision 1.17). Convert once at the boundary with `.dt.convert_time_zone("UTC")`.
+
+---
+
 ## Parameter vocabulary, units & aggregation
 
 These three are a single coherent concern (mirroring SAP3's `ParameterDefinition`, which binds name → unit → aggregation) and each is a **coordination contract with SAP3**.

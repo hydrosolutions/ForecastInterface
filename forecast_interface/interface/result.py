@@ -1,8 +1,8 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from forecast_interface.common import UtcDatetime
 from forecast_interface.output.model_output import ModelOutput
 
 from .failure import FailureCause
@@ -18,7 +18,7 @@ class ModelSuccess(BaseModel):
 class ModelFailure(BaseModel):
     kind: Literal["failure"] = "failure"
     model_name: str
-    issue_datetime: datetime
+    issue_datetime: UtcDatetime
     cause: FailureCause
     message: str
 

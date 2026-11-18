@@ -1,6 +1,11 @@
-from datetime import datetime
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    computed_field,
+    field_validator,
+)
 
-from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from forecast_interface.common import UtcDatetime
 
 from .status import VariableStatus
 from .variable_output import VariableOutput
@@ -14,7 +19,7 @@ class ModelOutput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str
-    issue_datetime: datetime
+    issue_datetime: UtcDatetime
     # PROVISIONAL (Q1): station ids are opaque strings; the SAP3 adapter maps them to/from typed StationId (UUID).
     variables: dict[str, dict[str, VariableOutput]]
 

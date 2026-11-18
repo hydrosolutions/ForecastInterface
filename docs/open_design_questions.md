@@ -119,6 +119,103 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Reflected in:** `docs/model_interface.md`.
 
+## 1.17 Temporal contract enforcement: declared cadence & tz-aware datetimes — RESOLVED
+
+**Decision:** FI validates the temporal contract it already declares, in three parts.
+
+1. **Cadence is enforced.** Within each `issue_datetime` group, consecutive `datetime` values must be
+   spaced by exactly the declared `VariableMetadata.timedelta`. Non-uniform spacing is rejected —
+   `forecast_horizon` and `offset` are counts of uniform steps and have no meaning otherwise. A
+   **single-row group passes vacuously**: it has no measurable spacing, `forecast_horizon = 1` is
+   valid, and FI must not fabricate a cadence for it. Strictly-increasing order comes free with the
+   check, since the required diff is positive.
+2. **Datetimes must be timezone-aware UTC** — both temporal columns, the
+   `ModelOutput.issue_datetime` scalar, which today has no validator at all, and the `datetime`
+   column of `InputSeries`.
+3. **Null temporal values are rejected.** Neither `issue_datetime` nor `datetime` may carry a null,
+   in any of the four data containers. This aligns the output side with the rule the input side has
+   always enforced (`'datetime' values must not be null`), and closes a hole the cadence check alone
+   could not: `.diff().over(...)` emits a null gap for a null timestamp, which `.drop_nulls()` then
+   swallows, so a null `datetime` slipped past an otherwise strict cadence validator.
+
+Behavior changes to note: a present but **empty** `epistemic_uncertainty` frame was previously
+accepted and is now rejected, and the cadence errors now name the offending `issue_datetime` group and
+the `datetime` of the row where the gap occurs (unsorted rows and out-of-range gaps get their own
+messages).
+
+**Not taken: Q6 cross-validator.** A strict per-row check — every row's `issue_datetime` equals
+`ModelOutput.issue_datetime` — was implemented alongside the above and then **pulled**, because it
+makes `BatchHindcastModel` unimplementable. `hindcast` takes a `Sequence[datetime]` of issue times
+and returns a *single* `ModelResult`; `ModelSuccess` holds exactly one `ModelOutput`, which holds one
+scalar `issue_datetime`. Decision 1.8's knock-on requires precisely the opposite of strict equality
+on that path: the per-row column **varies** across the batch. Q6's set-membership half is no escape —
+it needs a declared list of issue times on `ModelOutput`, and no such field exists. Q6 was answered
+against a shape that was never built.
+
+**Q6 is therefore ANSWERED IN PRINCIPLE BUT NOT IMPLEMENTABLE** against the current `ModelOutput`
+shape, and the shape needs its own decision before any validator lands. Candidate
+directions, neither chosen here: `ModelOutput` gains an `issue_datetimes` declaration the validator
+can check membership against, or `hindcast` returns a *sequence* of results so each output keeps a
+single issue time. Do not re-attempt the unconditional validator without settling that shape first.
+
+**Rationale:** raised by SAPPHIRE Flow as FI issue #9. `_validate_forecast_horizon`
+(`variable_output.py:145`; `:132` at the revision the issue was filed against) already cross-checks
+the frame against the metadata — the row count per issue group — but never the spacing, so a model
+may declare `1 day`, emit three rows one hour apart, and FI accepts it: three rows is what a horizon
+of three asks for. There is no principled line on which the count is FI's job and the spacing is
+each consumer's. This is the same shape as 1.16
+(fi-issues/002): a declaration with two readings in the wild, settled in the type rather than in each
+consumer's adapter. SAP3 *could* compare metadata and frame in its own adapter — it holds both at one
+point — but then only the consumer that wrote the guard is protected.
+
+For the timezone half, the contract **already states UTC** (`docs/model_interface.md:112,130-131`),
+so this enforces an existing statement rather than adding a requirement — and the shipped README
+example contradicted it by constructing naive datetimes. The exposure is concrete: SAPPHIRE is
+extending to Nepal at **UTC+05:45**, where a naive timestamp read as UTC is off by 345 minutes and
+can land in the wrong day. Note precisely where the hazard sits: **tz-naive is the whole hazard**,
+because it fabricates an instant. The *display* zone does not affect spacing — polars stores
+instants, and a Zurich-local daily series and its UTC conversion both diff to `[1 day, 23:00:00]`
+across a DST transition (verified). UTC specifically is therefore required for **contract clarity,
+not correctness**, and the producer's escape is a one-line `.dt.convert_time_zone("UTC")`.
+The `Etc/UTC` alias is rejected too, intentionally: the check is the literal string `"UTC"`, keeping one canonical spelling for the contract.
+
+**Reject, not deprecate:** the consumer set is closed and known — aquacast and SAPPHIRE Flow, both
+pinning FI by exact tag, SAP3 additionally enforcing `SUPPORTED_FI_VERSION` at run time — so a
+stricter validator lands only when each side chooses to bump, exactly the adoption model 1.16 relies
+on. SAP3 measured all five models on staging on 2026-09-08: cadence is exactly `1 day` for every one,
+matching aquacast's declaration, so there is **no known violator** to deprecate for. FI also has no
+warning infrastructure — every validator raises — and building `warnings` plumbing into a contract
+package for a violator set of zero is not worth it.
+
+**Placement:** `validate_temporal_columns` keeps its signature. It is called from all four data
+containers (`DeterministicData`, `QuantileData`, `TrajectoryData`, `EpistemicUncertaintyData`), none
+of which holds the metadata, so threading metadata through them would break standalone construction
+for no gain. `VariableOutput` is the only place where metadata and frames coexist, so
+`validate_cadence(df, timedelta)` is called from there. The cadence check covers
+`epistemic_uncertainty`; **open sub-point:** `_validate_forecast_horizon` skips
+`epistemic_uncertainty`, and it is not clear from the record whether that omission is deliberate.
+**Half closed:** the *emptiness* consequence of that skip is fixed — a present
+`epistemic_uncertainty` frame with zero rows used to be accepted, and non-emptiness now lives in its
+own `VariableOutput` validator that walks all four frames, so it no longer rides on the horizon
+check. The *row-count* half remains open: `epistemic_uncertainty` is still not checked for
+`forecast_horizon` rows per `issue_datetime`, deliberately left as-is pending that decision.
+
+**Relation to 1.12:** a strict uniform-spacing check hard-codes 1.12's fixed-duration assumption. It
+is correct for every step v1 admits, and it becomes the natural extension point when 1.12's deferred
+`TimeStep = timedelta | CalendarResolution` lands — a decadal series legitimately shows 8–11 day
+gaps.
+
+**Adoption (cross-repo):** SAPPHIRE Flow consumes aquacast and both are installed in the same
+environment with exact pins, so the two must move in lockstep and neither can adopt ahead of the
+other. Shipped as a **single minor release (v0.2.0)** rather than split, because a split buys nothing
+on the timeline and costs a second coordinated migration. aquacast adoption is expected **October
+2026**; cutting the tag ahead of that gives aquacast a fixed target to develop against. The cadence
+half is measured safe; the timezone half is expected to require an aquacast change, since SAP3's
+adapter carries the comment `# FI datetimes are UTC by contract; tz-naive values are localized, not
+shifted.` — a code path that exists only because naive values arrive today.
+
+**Reflected in:** `docs/model_interface.md`, `docs/input_requirement.md`, `README.md`, and code.
+
 ## 1.16 `future_steps` semantics: floor vs. ceiling — RESOLVED
 
 **Decision:** the requirement states its own semantics. `FutureKnownVariable` gains a
@@ -331,11 +428,13 @@ A decision-ready list. Each needs the model developer's input before the corresp
 
 **Reflected in:** `docs/model_interface.md`.
 
-### Q6 — Per-row `issue_datetime` column — ANSWERED (scoped by decision 1.8)
+### Q6 — Per-row `issue_datetime` column — ANSWERED IN PRINCIPLE, NOT IMPLEMENTABLE (scoped by decision 1.8)
 
 The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` and renames the per-row datetime column → `valid_time`. The question is whether to **keep the per-row `issue_datetime` column requirement** — with a cross-validator that it matches the top-level `issue_datetime` for forecasts — or **relax it**. Frame this as a validator question, not a removal: the column is not "dropped", it is renamed and re-used.
 
 **Now scoped by decision 1.8:** a plain `ForecastModel` (`predict`) always emits a constant per-row `issue_datetime` equal to the top-level one — so for the required surface this *can* carry a strict cross-validator. The varying-per-row case exists **only** on the optional `BatchHindcastModel` path, where the validator must instead check that the per-row `issue_datetime` matches the batch's declared `issue_datetimes`. So the answer likely differs by protocol: strict equality for `predict`, set-membership for batch `hindcast`.
+
+**Implementation attempted and pulled (decision 1.17).** The strict-equality half was written as an unconditional `ModelOutput` validator and removed again: it makes `BatchHindcastModel` unimplementable. `hindcast` takes a `Sequence[datetime]` and returns one `ModelResult`, whose `ModelSuccess` holds one `ModelOutput` with one scalar `issue_datetime` — so a batch over N issue times *must* emit one output whose rows carry N distinct per-row values, exactly what strict equality forbids. The set-membership half cannot stand in: it needs a declared list of issue times on `ModelOutput`, and there is no such field. **Do not retry the validator as-is.** The answer above stands in principle; it is simply not implementable against the current `ModelOutput` shape, so the *shape* question is what remains open (see decision 1.17). Settle the shape first — either `ModelOutput` gains an `issue_datetimes` declaration, or `hindcast` returns a sequence of results — then decide.
 
 ### Q8 — `config` contents — OPEN (awaiting Sandro, then partition)
 

@@ -8,6 +8,7 @@ from pydantic import (
 )
 
 from ._validators import (
+    validate_cadence,
     validate_temporal_columns,
     validate_exact_columns,
     validate_numeric_columns,
@@ -118,6 +119,18 @@ class VariableOutput(BaseModel):
     def trusted(self) -> bool:
         return len(self.flags) == 0
 
+    def _frames(self) -> list[tuple[str, pl.DataFrame]]:
+        return [
+            (representation, container.data)
+            for representation, container in (
+                ("deterministic", self.deterministic),
+                ("quantiles", self.quantiles),
+                ("trajectories", self.trajectories),
+                ("epistemic_uncertainty", self.epistemic_uncertainty),
+            )
+            if container is not None
+        ]
+
     @model_validator(mode="after")
     def _validate_data_present(self) -> "VariableOutput":
         if self.status in (VariableStatus.SUCCESS, VariableStatus.PARTIAL):
@@ -126,6 +139,14 @@ class VariableOutput(BaseModel):
                     "at least one of deterministic, quantiles, or trajectories "
                     "must be present when status is SUCCESS or PARTIAL"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_not_empty(self) -> "VariableOutput":
+        # Covers epistemic_uncertainty too, which the horizon check skips.
+        for representation, df in self._frames():
+            if df.height == 0:
+                raise ValueError(f"{representation} data must not be empty")
         return self
 
     @model_validator(mode="after")
@@ -138,8 +159,6 @@ class VariableOutput(BaseModel):
             if data_container is None:
                 continue
             df = data_container.data
-            if df.height == 0:
-                raise ValueError(f"{representation} data must not be empty")
             mismatches = (
                 df.group_by("issue_datetime")
                 .agg(pl.len().alias("rows"))
@@ -152,4 +171,11 @@ class VariableOutput(BaseModel):
                     f"{self.metadata.forecast_horizon} rows per issue_datetime "
                     f"(got {observed})"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_cadence(self) -> "VariableOutput":
+        # Covers epistemic_uncertainty too: it carries the same temporal columns.
+        for _, df in self._frames():
+            validate_cadence(df, self.metadata.timedelta)
         return self

@@ -1,5 +1,6 @@
 import datetime
 from datetime import timedelta
+from typing import Literal
 
 import polars as pl
 import pytest
@@ -18,9 +19,10 @@ from forecast_interface.output import (
     VariableStatus,
 )
 
-_ISSUE_DT = datetime.datetime(2024, 1, 1, 6, 0)
-_DT1 = datetime.datetime(2024, 1, 1)
-_DT2 = datetime.datetime(2024, 1, 2)
+_UTC = datetime.timezone.utc
+_ISSUE_DT = datetime.datetime(2024, 1, 1, 6, 0, tzinfo=_UTC)
+_DT1 = datetime.datetime(2024, 1, 1, tzinfo=_UTC)
+_DT2 = datetime.datetime(2024, 1, 2, tzinfo=_UTC)
 
 
 def _make_metadata(**overrides: object) -> VariableMetadata:
@@ -46,6 +48,21 @@ def _make_det_df() -> pl.DataFrame:
 
 def _make_deterministic() -> DeterministicData:
     return DeterministicData(data=_make_det_df())
+
+
+def _make_det_df_at(
+    issue: datetime.datetime,
+    starts: datetime.datetime,
+    step: datetime.timedelta,
+    rows: int,
+) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "issue_datetime": [issue] * rows,
+            "datetime": [starts + step * i for i in range(rows)],
+            "value": [float(i) for i in range(rows)],
+        }
+    )
 
 
 class TestUnit:
@@ -119,6 +136,18 @@ class TestVariableMetadata:
     def test_zero_offset_accepted(self) -> None:
         meta = _make_metadata(offset=0)
         assert meta.offset == 0
+
+
+def _make_det_df_in_unit(
+    step: datetime.timedelta,
+    time_unit: Literal["ms", "us", "ns"],
+    rows: int = 2,
+) -> pl.DataFrame:
+    df = _make_det_df_at(_ISSUE_DT, _DT1, step, rows)
+    dtype = pl.Datetime(time_unit=time_unit, time_zone="UTC")
+    return df.with_columns(
+        pl.col("issue_datetime").cast(dtype), pl.col("datetime").cast(dtype)
+    )
 
 
 def _make_epistemic_df() -> pl.DataFrame:
@@ -290,6 +319,51 @@ class TestDeterministicData:
             }
         )
         with pytest.raises(ValueError, match="must be Datetime"):
+            DeterministicData(data=df)
+
+    def test_naive_datetime_column_rejected(self) -> None:
+        df = _make_det_df().with_columns(pl.col("datetime").dt.replace_time_zone(None))
+        with pytest.raises(
+            ValueError, match="'datetime' column must be timezone-aware UTC"
+        ):
+            DeterministicData(data=df)
+
+    def test_naive_issue_datetime_column_rejected(self) -> None:
+        df = _make_det_df().with_columns(
+            pl.col("issue_datetime").dt.replace_time_zone(None)
+        )
+        with pytest.raises(
+            ValueError, match="'issue_datetime' column must be timezone-aware UTC"
+        ):
+            DeterministicData(data=df)
+
+    def test_non_utc_timezone_column_rejected(self) -> None:
+        df = _make_det_df().with_columns(
+            pl.col("datetime").dt.convert_time_zone("Asia/Kathmandu")
+        )
+        with pytest.raises(ValueError, match="must be timezone-aware UTC"):
+            DeterministicData(data=df)
+
+    def test_utc_timezone_accepted(self) -> None:
+        det = DeterministicData(data=_make_det_df())
+        assert det.data.schema["datetime"] == pl.Datetime(time_zone="UTC")
+
+    def test_null_datetime_value_rejected(self) -> None:
+        df = _make_det_df().with_columns(
+            pl.Series("datetime", [_DT1, None], dtype=pl.Datetime(time_zone="UTC"))
+        )
+        with pytest.raises(ValueError, match="'datetime' values must not be null"):
+            DeterministicData(data=df)
+
+    def test_null_issue_datetime_value_rejected(self) -> None:
+        df = _make_det_df().with_columns(
+            pl.Series(
+                "issue_datetime", [_ISSUE_DT, None], dtype=pl.Datetime(time_zone="UTC")
+            )
+        )
+        with pytest.raises(
+            ValueError, match="'issue_datetime' values must not be null"
+        ):
             DeterministicData(data=df)
 
 
@@ -638,15 +712,15 @@ class TestVariableOutput:
         assert vo.deterministic is not None
 
     def test_horizon_validator_passes_batch_hindcast(self) -> None:
-        issue_2 = datetime.datetime(2024, 1, 2, 6, 0)
+        issue_2 = datetime.datetime(2024, 1, 2, 6, 0, tzinfo=_UTC)
         df = pl.DataFrame(
             {
                 "issue_datetime": [_ISSUE_DT, _ISSUE_DT, issue_2, issue_2],
                 "datetime": [
                     _DT1,
                     _DT2,
-                    datetime.datetime(2024, 1, 3),
-                    datetime.datetime(2024, 1, 4),
+                    datetime.datetime(2024, 1, 3, tzinfo=_UTC),
+                    datetime.datetime(2024, 1, 4, tzinfo=_UTC),
                 ],
                 "value": [1.0, 2.0, 3.0, 4.0],
             }
@@ -676,8 +750,8 @@ class TestVariableOutput:
     def test_horizon_validator_rejects_empty_present_representation(self) -> None:
         df = pl.DataFrame(
             schema={
-                "issue_datetime": pl.Datetime,
-                "datetime": pl.Datetime,
+                "issue_datetime": pl.Datetime(time_zone="UTC"),
+                "datetime": pl.Datetime(time_zone="UTC"),
                 "value": pl.Float64,
             }
         )
@@ -704,6 +778,25 @@ class TestVariableOutput:
                 epistemic_uncertainty=EpistemicUncertaintyData(
                     data=_make_epistemic_df()
                 ),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_empty_epistemic_uncertainty_rejected(self) -> None:
+        df = pl.DataFrame(
+            schema={
+                "issue_datetime": pl.Datetime(time_zone="UTC"),
+                "datetime": pl.Datetime(time_zone="UTC"),
+                "std": pl.Float64,
+                "range": pl.Float64,
+            }
+        )
+        with pytest.raises(
+            ValueError, match="epistemic_uncertainty data must not be empty"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(),
+                deterministic=_make_deterministic(),
+                epistemic_uncertainty=EpistemicUncertaintyData(data=df),
                 status=VariableStatus.SUCCESS,
             )
 
@@ -747,6 +840,127 @@ class TestVariableOutput:
         assert len(vo.flags) == 2
         assert vo.trusted is False
 
+    def test_cadence_mismatch_rejected(self) -> None:
+        df = _make_det_df_at(_ISSUE_DT, _DT1, timedelta(hours=1), 3)
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=3),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_uniform_cadence_accepted(self) -> None:
+        df = _make_det_df_at(_ISSUE_DT, _DT1, timedelta(days=1), 3)
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=3),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_non_uniform_cadence_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 3,
+                "datetime": [
+                    _DT1,
+                    _DT1 + timedelta(days=1),
+                    _DT1 + timedelta(days=3),
+                ],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        with pytest.raises(ValueError, match="got 2 days"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=3),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_unsorted_rows_within_group_rejected(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 3,
+                "datetime": [
+                    _DT1 + timedelta(days=1),
+                    _DT1,
+                    _DT1 + timedelta(days=2),
+                ],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        with pytest.raises(ValueError, match="must be sorted ascending by datetime"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=3),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    @pytest.mark.parametrize("zone", ["Europe/Zurich", "Etc/UTC"])
+    def test_non_utc_zone_rejected(self, zone: str) -> None:
+        df = _make_det_df().with_columns(
+            pl.col("issue_datetime", "datetime").dt.convert_time_zone(zone)
+        )
+        with pytest.raises(ValueError, match="timezone-aware UTC"):
+            DeterministicData(data=df)
+
+    def test_single_row_group_accepted(self) -> None:
+        df = _make_det_df_at(_ISSUE_DT, _DT1, timedelta(days=1), 1)
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=1),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_cadence_checked_per_issue_datetime_group(self) -> None:
+        issue_2 = _ISSUE_DT + timedelta(days=10)
+        df = pl.concat(
+            [
+                _make_det_df_at(_ISSUE_DT, _DT1, timedelta(days=1), 2),
+                _make_det_df_at(issue_2, _DT1, timedelta(hours=6), 2),
+            ]
+        )
+        with pytest.raises(ValueError, match="got 6:00:00"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_cadence_of_each_group_validated_independently(self) -> None:
+        issue_2 = _ISSUE_DT + timedelta(days=10)
+        df = pl.concat(
+            [
+                _make_det_df_at(_ISSUE_DT, _DT1, timedelta(days=1), 2),
+                _make_det_df_at(
+                    issue_2, _DT1 + timedelta(days=10), timedelta(days=1), 2
+                ),
+            ]
+        )
+        vo = VariableOutput(
+            metadata=_make_metadata(forecast_horizon=2),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_cadence_checked_on_epistemic_uncertainty(self) -> None:
+        eu_df = _make_epistemic_df().with_columns(
+            pl.Series("datetime", [_DT1, _DT1 + timedelta(hours=1)])
+        )
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(),
+                deterministic=_make_deterministic(),
+                epistemic_uncertainty=EpistemicUncertaintyData(data=eu_df),
+                status=VariableStatus.SUCCESS,
+            )
+
 
 class TestModelOutput:
     def _make_variable_output(
@@ -766,7 +980,7 @@ class TestModelOutput:
     def test_valid_single_station(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={"station_1": {"discharge": self._make_variable_output()}},
         )
         assert mo.model_name == "test_model"
@@ -776,7 +990,7 @@ class TestModelOutput:
     def test_valid_multi_station(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {"discharge": self._make_variable_output()},
                 "station_2": {"discharge": self._make_variable_output()},
@@ -787,7 +1001,7 @@ class TestModelOutput:
     def test_multiple_variables_per_station(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {
                     "discharge": self._make_variable_output(),
@@ -800,7 +1014,7 @@ class TestModelOutput:
     def test_success_all_success(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {"a": self._make_variable_output(VariableStatus.SUCCESS)},
                 "station_2": {"b": self._make_variable_output(VariableStatus.SUCCESS)},
@@ -811,7 +1025,7 @@ class TestModelOutput:
     def test_success_false_when_any_failure(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {"a": self._make_variable_output(VariableStatus.SUCCESS)},
                 "station_2": {"b": self._make_variable_output(VariableStatus.FAILURE)},
@@ -822,7 +1036,7 @@ class TestModelOutput:
     def test_success_false_when_any_partial(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {
                     "a": self._make_variable_output(VariableStatus.SUCCESS),
@@ -837,7 +1051,7 @@ class TestModelOutput:
         # entry, never an absent key; this still constructs but flips success.
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {"discharge": self._make_variable_output()},
                 "station_2": {
@@ -851,7 +1065,7 @@ class TestModelOutput:
     def test_roundtrip_preserves_nested_shape(self) -> None:
         mo = ModelOutput(
             model_name="test_model",
-            issue_datetime=datetime.datetime(2024, 1, 1),
+            issue_datetime=_ISSUE_DT,
             variables={
                 "station_1": {
                     "discharge": self._make_variable_output(VariableStatus.FAILURE)
@@ -867,7 +1081,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="model_name must be a non-empty string"):
             ModelOutput(
                 model_name="",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"station_1": {"discharge": self._make_variable_output()}},
             )
 
@@ -875,7 +1089,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="model_name must be a non-empty string"):
             ModelOutput(
                 model_name="   ",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"station_1": {"discharge": self._make_variable_output()}},
             )
 
@@ -883,7 +1097,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="at least one station"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={},
             )
 
@@ -891,7 +1105,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="at least one variable"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"station_1": {}},
             )
 
@@ -899,7 +1113,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="station id keys must be non-empty"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"": {"discharge": self._make_variable_output()}},
             )
 
@@ -907,7 +1121,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="station id keys must be non-empty"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"   ": {"discharge": self._make_variable_output()}},
             )
 
@@ -915,7 +1129,7 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="variable name keys must be non-empty"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"station_1": {"": self._make_variable_output()}},
             )
 
@@ -923,6 +1137,186 @@ class TestModelOutput:
         with pytest.raises(ValueError, match="variable name keys must be non-empty"):
             ModelOutput(
                 model_name="test_model",
-                issue_datetime=datetime.datetime(2024, 1, 1),
+                issue_datetime=_ISSUE_DT,
                 variables={"station_1": {"   ": self._make_variable_output()}},
             )
+
+    def test_naive_issue_datetime_rejected(self) -> None:
+        with pytest.raises(ValueError, match="should have timezone info"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1, 6, 0),
+                variables={"station_1": {"discharge": self._make_variable_output()}},
+            )
+
+    def test_non_utc_issue_datetime_rejected(self) -> None:
+        offset = datetime.timezone(timedelta(hours=5, minutes=45))
+        with pytest.raises(ValueError, match="issue_datetime must be UTC"):
+            ModelOutput(
+                model_name="test_model",
+                issue_datetime=datetime.datetime(2024, 1, 1, 11, 45, tzinfo=offset),
+                variables={"station_1": {"discharge": self._make_variable_output()}},
+            )
+
+
+class TestCadenceTimeUnitPrecision:
+    def test_ms_frame_rejects_declared_sub_millisecond_cadence(self) -> None:
+        df = _make_det_df_in_unit(timedelta(microseconds=1000), "ms")
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=timedelta(microseconds=1500)),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_ms_frame_rejects_sub_millisecond_remainder_of_declared_cadence(
+        self,
+    ) -> None:
+        df = _make_det_df_in_unit(timedelta(days=1), "ms")
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=timedelta(days=1, microseconds=500)),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_ms_frame_rejects_duplicate_timestamps(self) -> None:
+        df = _make_det_df_in_unit(timedelta(0), "ms")
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=timedelta(microseconds=500)),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_ms_frame_with_matching_cadence_accepted(self) -> None:
+        df = _make_det_df_in_unit(timedelta(hours=6), "ms")
+        vo = VariableOutput(
+            metadata=_make_metadata(timedelta=timedelta(hours=6)),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_ns_frame_with_matching_sub_millisecond_cadence_accepted(self) -> None:
+        df = _make_det_df_in_unit(timedelta(microseconds=1500), "ns")
+        vo = VariableOutput(
+            metadata=_make_metadata(timedelta=timedelta(microseconds=1500)),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_us_frame_with_matching_microsecond_cadence_accepted(self) -> None:
+        df = _make_det_df_in_unit(timedelta(microseconds=1500), "us")
+        vo = VariableOutput(
+            metadata=_make_metadata(timedelta=timedelta(microseconds=1500)),
+            deterministic=DeterministicData(data=df),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+
+    def test_us_frame_rejects_mismatched_microsecond_cadence(self) -> None:
+        df = _make_det_df_in_unit(timedelta(microseconds=1000), "us")
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=timedelta(microseconds=1500)),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_ns_frame_rejects_mismatched_sub_millisecond_cadence(self) -> None:
+        df = _make_det_df_in_unit(timedelta(microseconds=1000), "ns")
+        with pytest.raises(
+            ValueError, match="spacing must equal the declared timedelta"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=timedelta(microseconds=1500)),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+
+class TestCadenceOutOfRepresentableRange:
+    def test_declared_cadence_beyond_nanosecond_range_raises_value_error(self) -> None:
+        step = timedelta(days=146_097)  # 400 years — overflows i64 nanoseconds
+        df = _make_det_df_at(
+            _ISSUE_DT, datetime.datetime(1600, 1, 1, tzinfo=_UTC), step, 2
+        )
+        with pytest.raises(ValueError, match="cadence out of representable range"):
+            VariableOutput(
+                metadata=_make_metadata(timedelta=step),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+
+class TestCadenceErrorLocation:
+    def test_data_gap_beyond_nanosecond_range_blames_the_data(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 2,
+                "datetime": [
+                    datetime.datetime(1000, 1, 1, tzinfo=_UTC),
+                    datetime.datetime(9000, 1, 1, tzinfo=_UTC),
+                ],
+                "value": [1.0, 2.0],
+            }
+        )
+        with pytest.raises(ValueError, match="gap at issue_datetime 2024-01-01 06:00"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_data_gap_beyond_range_says_out_of_representable_range(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 2,
+                "datetime": [
+                    datetime.datetime(1000, 1, 1, tzinfo=_UTC),
+                    datetime.datetime(9000, 1, 1, tzinfo=_UTC),
+                ],
+                "value": [1.0, 2.0],
+            }
+        )
+        with pytest.raises(ValueError, match="out of representable range"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_spacing_error_names_group_and_row(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 3,
+                "datetime": [_DT1, _DT1 + timedelta(days=1), _DT1 + timedelta(days=3)],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        with pytest.raises(
+            ValueError, match=r"issue_datetime 2024-01-01 06:00.*datetime 2024-01-04"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=3),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+
+class TestUtcDtypeAliasMessage:
+    def test_alias_time_zone_rejected_with_literal_utc_hint(self) -> None:
+        from forecast_interface.common import validate_utc_datetime_dtype
+
+        with pytest.raises(ValueError, match="only the literal 'UTC'"):
+            validate_utc_datetime_dtype("datetime", pl.Datetime("us", "Etc/UTC"))
