@@ -1,6 +1,18 @@
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
-from .common import AggregationMethod
+from .common import (
+    AggregationMethod,
+    Compatibility,
+    GridDeclaration,
+    GridMismatchError,
+    PeriodLabel,
+    TimeAnchor,
+    TimeGrid,
+    TrainingGridDeclaration,
+    Unknown,
+    compatibility,
+    require_compatible,
+)
 from .input import (
     DynamicInputs,
     DynamicInputSpec,
@@ -23,12 +35,14 @@ from .interface import (
     BatchHindcastModel,
     FailureCause,
     ForecastModel,
+    GridDeclaringArtifact,
     ModelFailure,
     ModelResult,
     ModelSuccess,
     RetrainableModel,
     RunConfig,
     TrainedArtifact,
+    artifact_training_grid,
 )
 from .output import (
     DeterministicData,
@@ -45,7 +59,19 @@ from .output import (
 
 __all__ = [
     "AggregationMethod",
+    "Compatibility",
+    "GridDeclaration",
+    "GridMismatchError",
+    "PeriodLabel",
+    "TimeAnchor",
+    "TimeGrid",
+    "TrainingGridDeclaration",
+    "Unknown",
+    "compatibility",
+    "require_compatible",
     "ArtifactScope",
+    "GridDeclaringArtifact",
+    "artifact_training_grid",
     "BatchHindcastModel",
     "DeterministicData",
     "DynamicInputs",

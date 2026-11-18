@@ -7,6 +7,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from forecast_interface.common import PeriodLabel, TimeGrid, TrainingGridDeclaration
 from forecast_interface.input import (
     DynamicInputSpec,
     InputRequirement,
@@ -22,11 +23,13 @@ from forecast_interface.interface import (
     BatchHindcastModel,
     FailureCause,
     ForecastModel,
+    GridDeclaringArtifact,
     ModelFailure,
     ModelResult,
     ModelSuccess,
     RetrainableModel,
     TrainedArtifact,
+    artifact_training_grid,
 )
 from forecast_interface.output import (
     DeterministicData,
@@ -104,7 +107,7 @@ def _make_input_requirement() -> InputRequirement:
 
 class TestFailureCause:
     def test_member_count(self) -> None:
-        assert len(FailureCause) == 5
+        assert len(FailureCause) == 6
 
     def test_members_exist(self) -> None:
         assert FailureCause.INPUT_DATA is not None
@@ -384,3 +387,123 @@ class TestForecastModel:
         model = _BatchHindcastModel()
         assert isinstance(model, BatchHindcastModel)
         assert isinstance(model, ForecastModel)
+
+
+class _LegacyArtifact:
+    pass
+
+
+class _GridArtifact:
+    def __init__(self, declaration: TrainingGridDeclaration) -> None:
+        self._declaration = declaration
+
+    @property
+    def training_grid(self) -> TrainingGridDeclaration:
+        return self._declaration
+
+
+class _AttributeErrorArtifact:
+    @property
+    def training_grid(self) -> TrainingGridDeclaration:
+        raise AttributeError("not ready")
+
+
+class _RuntimeErrorArtifact:
+    @property
+    def training_grid(self) -> TrainingGridDeclaration:
+        raise RuntimeError("boom")
+
+
+class _RaisingArtifact:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    @property
+    def training_grid(self) -> TrainingGridDeclaration:
+        raise self._exc
+
+
+class _ReturningArtifact:
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    @property
+    def training_grid(self) -> object:
+        return self._value
+
+
+_GRID = TimeGrid(step=timedelta(hours=1), origin=timedelta(0), label=PeriodLabel.START)
+_UNKNOWN = TrainingGridDeclaration()
+
+
+class _FakeGridModel:
+    def serialize_artifact(self, artifact: _GridArtifact) -> bytes:
+        return artifact.training_grid.model_dump_json().encode()
+
+    def deserialize_artifact(self, data: bytes) -> _GridArtifact:
+        return _GridArtifact(TrainingGridDeclaration.model_validate_json(data))
+
+
+class TestArtifactTrainingGrid:
+    def test_legacy_artifact_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_LegacyArtifact()) == _UNKNOWN
+
+    def test_declared_grid_is_returned(self) -> None:
+        declaration = TrainingGridDeclaration(grid=_GRID)
+        assert artifact_training_grid(_GridArtifact(declaration)) == declaration
+
+    def test_attribute_error_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_AttributeErrorArtifact()) == _UNKNOWN
+
+    def test_runtime_error_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_RuntimeErrorArtifact()) == _UNKNOWN
+
+    def test_value_error_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_RaisingArtifact(ValueError("bad"))) == _UNKNOWN
+
+    def test_key_error_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_RaisingArtifact(KeyError("k"))) == _UNKNOWN
+
+    def test_non_declaration_int_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_ReturningArtifact(5)) == _UNKNOWN
+
+    def test_none_reads_as_unknown(self) -> None:
+        assert artifact_training_grid(_ReturningArtifact(None)) == _UNKNOWN
+
+
+class TestGridDeclaringArtifact:
+    def test_conforming_class_is_detected(self) -> None:
+        assert isinstance(_GridArtifact(_UNKNOWN), GridDeclaringArtifact)
+
+    def test_non_conforming_class_is_not_detected(self) -> None:
+        assert not isinstance(_LegacyArtifact(), GridDeclaringArtifact)
+
+
+class TestGridRoundTrip:
+    @pytest.mark.parametrize(
+        "declaration",
+        [TrainingGridDeclaration(grid=_GRID), _UNKNOWN],
+        ids=["known", "unknown"],
+    )
+    def test_declaration_survives_serialization(
+        self, declaration: TrainingGridDeclaration
+    ) -> None:
+        model = _FakeGridModel()
+        restored = model.deserialize_artifact(
+            model.serialize_artifact(_GridArtifact(declaration))
+        )
+        assert artifact_training_grid(restored) == declaration
+
+
+class TestGridMismatchFailure:
+    def test_cause_exists_and_is_appended(self) -> None:
+        assert list(FailureCause)[-1] is FailureCause.GRID_MISMATCH
+
+    def test_model_failure_accepts_it(self) -> None:
+        failure = ModelFailure(
+            model_name="my_model",
+            issue_datetime=_ISSUE_DT,
+            cause=FailureCause.GRID_MISMATCH,
+            message="grid differs",
+        )
+        assert failure.cause is FailureCause.GRID_MISMATCH

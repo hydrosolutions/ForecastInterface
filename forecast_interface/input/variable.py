@@ -3,6 +3,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from forecast_interface.common.aggregation import AggregationMethod
+from forecast_interface.common.time_grid import PeriodLabel
 from forecast_interface.common.units import Unit
 
 
@@ -18,11 +19,31 @@ class HorizonSemantics(Enum):
     AT_MOST = "at_most"
 
 
+def _reject_point_label(
+    aggregation: AggregationMethod | None, label: PeriodLabel | None
+) -> None:
+    if (
+        aggregation is AggregationMethod.POINT
+        and label is not None
+        and label is not PeriodLabel.UNKNOWN
+    ):
+        raise ValueError(
+            "label is meaningless with POINT aggregation (value sampled at the stamp)"
+        )
+
+
 class PastKnownVariable(BaseModel):
     lookback: int
     max_nan: int
     unit: Unit
     aggregation: AggregationMethod | None = None
+    # None inherits the label declared on the branch anchor.
+    label: PeriodLabel | None = None
+
+    @model_validator(mode="after")
+    def _label_matches_aggregation(self) -> "PastKnownVariable":
+        _reject_point_label(self.aggregation, self.label)
+        return self
 
     @field_validator("lookback")
     @classmethod
@@ -48,6 +69,7 @@ class FutureKnownVariable(BaseModel):
     max_nan: int
     unit: Unit
     aggregation: AggregationMethod | None = None
+    label: PeriodLabel | None = None
     ensemble_mode: EnsembleMode = EnsembleMode.SINGLE
     horizon_semantics: HorizonSemantics = HorizonSemantics.EXACT
     min_future_steps: int | None = None
@@ -68,6 +90,7 @@ class FutureKnownVariable(BaseModel):
 
     @model_validator(mode="after")
     def _coherent_horizon_semantics(self) -> "FutureKnownVariable":
+        _reject_point_label(self.aggregation, self.label)
         if self.horizon_semantics is HorizonSemantics.EXACT:
             if self.min_future_steps is not None:
                 raise ValueError(

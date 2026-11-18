@@ -1,4 +1,4 @@
-from .artifact import TrainedArtifact
+from .artifact import GridDeclaringArtifact, TrainedArtifact, artifact_training_grid
 from .failure import FailureCause
 from .protocol import BatchHindcastModel, ForecastModel, RetrainableModel
 from .result import ModelFailure, ModelResult, ModelSuccess
@@ -10,10 +10,12 @@ __all__ = [
     "BatchHindcastModel",
     "FailureCause",
     "ForecastModel",
+    "GridDeclaringArtifact",
     "ModelFailure",
     "ModelResult",
     "ModelSuccess",
     "RetrainableModel",
     "RunConfig",
     "TrainedArtifact",
+    "artifact_training_grid",
 ]

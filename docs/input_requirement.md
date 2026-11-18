@@ -22,10 +22,16 @@ A model must declare what it forecasts. `targets` is a dict keyed by variable na
 class TargetSpec(BaseModel):
     unit: Unit
     representations: frozenset[OutputRepresentation]
+    aggregation: AggregationMethod | None = None
+    label: PeriodLabel = PeriodLabel.UNKNOWN
 ```
 
 - **unit** — the physical unit of the target (e.g. `Unit.M3_PER_S`).
 - **representations** — the output forms the model can produce for this target, a non-empty set of `OutputRepresentation`: `deterministic`, `quantiles`, `trajectories`. A target may support more than one form.
+- **aggregation** — optional: how the target value relates to its time step (`SUM`, `MEAN`, `MAX`, `MIN`, `POINT`). See [Time grid](#time-grid).
+- **label** — optional `PeriodLabel` for the target stamps; defaults to `UNKNOWN`. Rejected with `POINT`.
+
+`SUM` combined with a **rate** unit (`M3_PER_S`, `MM_PER_DAY`, `MM_PER_HOUR`, `MM_PER_S`, `M_PER_S`, `W_PER_M2`) is rejected on targets: summing a rate does not yield that rate. `MEAN` with an accumulation-like unit (`MM`, `M`) is allowed, because states such as SWE or water level legitimately use those units. The check applies to targets only; input variables are unchanged.
 
 The combinability rule is **derived** from whether `TRAJECTORIES` is present — trajectory output is combinable (pooled / BMA); quantile-only or deterministic output is not. It is not separately encoded, and the combination mechanism (cross-model compatibility checks, weighting, member-id remapping, sentinel models) is entirely SAP3-side (decision 1.14).
 
@@ -70,6 +76,7 @@ The `SpatialInputSpec` model holds a `data` dict keyed by `SpatialRepresentation
 ```python
 class SpatialInputSpec(BaseModel):
     data: dict[SpatialRepresentation, DynamicInputSpec]
+    anchor: TimeAnchor = TimeAnchor()   # origin / label of this time step's grid
 ```
 
 A model can require any combination of representations within the same temporal resolution.
@@ -102,7 +109,8 @@ Each variable declares the following properties:
 | `max_nan`      | `int`  | both          | The model's **tolerance**: max NaNs it can cope with in the series (must be >= 0). **SAP3 enforces this as a pre-`predict` gate** — if exceeded, the model is not called and the station is failed (`DATA_AVAILABILITY`); within tolerance, residual NaNs are delivered **as-is** for the model to handle (decision 1.13). |
 | `ensemble_mode`| `EnsembleMode` | future_known  | Whether ensemble or single traces are needed (`single` or `ensemble`, default: `single`) |
 | `unit`         | `Unit` | both          | **Required.** The physical unit the model expects this variable in (e.g. `Unit.MM_PER_DAY`). The delivered series is tagged with its unit and delivered **in the declared unit, or rejected loudly at integration** — no data without units. (Automatic unit conversion is a future adapter feature.) |
-| `aggregation`  | `AggregationMethod \| None` | both | **Optional.** `SUM`, `MEAN` or `MAX`, used when the declared resolution is coarser than the delivered data. Defaults to the per-parameter convention (precipitation / reference_et = `SUM`; state variables = `MEAN`); declare only to override. |
+| `label`        | `PeriodLabel \| None` | both | **Optional.** Overrides the branch `anchor.label` for this variable; `None` inherits it. Rejected (unless `UNKNOWN`) with `POINT` aggregation. See [Time grid](#time-grid). |
+| `aggregation`  | `AggregationMethod \| None` | both | **Optional.** `SUM`, `MEAN`, `MAX`, `MIN` or `POINT`, used when the declared resolution is coarser than the delivered data. Defaults to the per-parameter convention (precipitation / reference_et = `SUM`; state variables = `MEAN`); declare only to override. |
 
 ### Horizon semantics
 
@@ -156,6 +164,28 @@ receives a 5-day forecast, where an `exact` declaration would oblige it to refus
 grants the permission; **acting on it is provider-side work** — a provider that does not yet read
 `horizon_semantics` keeps applying `future_steps` as a floor, which stays correct, just no less
 strict than before.
+
+---
+
+## Time grid
+
+A time step alone does not say *which* instants the stamps fall on, nor what a stamp means. The per-step branch (`SpatialInputSpec`) therefore carries an optional `anchor: TimeAnchor`:
+
+- **origin** — the grid's offset from UTC midnight, a `timedelta` in whole minutes with `0 <= origin < step`. The step must divide 24 h exactly (the grid is anchored to UTC midnight; FI has no calendar framework). Daily data stamped at 18:00Z has `origin=timedelta(hours=18)`. Default `Unknown.UNKNOWN` (not declared; never `None`, never `0`).
+- **label** — a `PeriodLabel`, default `UNKNOWN`:
+  - `START` — stamp `t` names the period `[t, t+step)`.
+  - `END` — stamp `t` names the period `(t-step, t]`.
+  - `UNKNOWN` — not declared; never treated as either.
+
+Origin alone cannot tell `START` from `END`: the same physical day can be stamped 18:00Z on its start or on its end, both 18:00 mod 24h. Hence the label.
+
+**Per-variable override.** `PastKnownVariable.label` / `FutureKnownVariable.label` override the branch label for that variable (e.g. SUM precipitation stamped `END` beside a `START` temperature). `None` (default) inherits the branch label. Origin is per branch only.
+
+**`AggregationMethod`** gains `MIN` and `POINT`. `POINT` means the value is sampled at the stamp rather than summarised over a window, so a label is meaningless and is rejected (unless `UNKNOWN`).
+
+**Input side.** `ModelInputs.grid: GridDeclaration` (default `Unknown.UNKNOWN`) is a `TimeGrid(step, origin, label)` or `Unknown`. When it is a `TimeGrid`, every `InputSeries.datetime` on the dynamic branch keyed by `grid.step` must satisfy `(datetime - UTC midnight) mod step == origin`; off-grid stamps are rejected. Branches with other steps, and an unknown grid, are not checked.
+
+Everything is additive: absent declarations read as unknown and behave as before.
 
 ---
 

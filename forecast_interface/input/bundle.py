@@ -3,7 +3,14 @@ import datetime
 import polars as pl
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from forecast_interface.common import SpatialRepresentation, Unit
+from forecast_interface.common import (
+    GridDeclaration,
+    SpatialRepresentation,
+    TimeGrid,
+    Unit,
+    Unknown,
+)
+from forecast_interface.common.temporal import validate_on_grid
 
 from ._validators import validate_input_series_dataframe
 
@@ -98,3 +105,26 @@ class ModelInputs(BaseModel):
             if not station_id or not station_id.strip():
                 raise ValueError("station keys must be non-empty strings")
         return v
+
+    grid: GridDeclaration = Unknown.UNKNOWN
+
+    @model_validator(mode="after")
+    def _series_on_declared_grid(self) -> "ModelInputs":
+        if not isinstance(self.grid, TimeGrid):
+            return self
+        grid = self.grid
+        for station_id, station in self.stations.items():
+            spatial = station.dynamic.get(grid.step)
+            if spatial is None:
+                continue
+            for dynamic in spatial.data.values():
+                for group in (dynamic.past_known, dynamic.future_known):
+                    for variable, series_by_name in group.items():
+                        for name, series in series_by_name.items():
+                            validate_on_grid(
+                                series.data["datetime"],
+                                grid.step,
+                                grid.origin,
+                                f"{station_id}/{variable}/{name} datetime",
+                            )
+        return self

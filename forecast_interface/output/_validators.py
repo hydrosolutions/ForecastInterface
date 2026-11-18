@@ -3,7 +3,10 @@ import datetime
 import polars as pl
 from polars.exceptions import InvalidOperationError
 
-from forecast_interface.common.temporal import validate_utc_datetime_dtype
+from forecast_interface.common.temporal import (
+    exact_nanoseconds,
+    validate_utc_datetime_dtype,
+)
 
 
 NUMERIC_DTYPES = (
@@ -31,11 +34,6 @@ def validate_temporal_columns(df: pl.DataFrame) -> None:
             raise ValueError(f"'{col}' values must not be null")
 
 
-def _exact_nanoseconds(td: datetime.timedelta) -> int:
-    # timedelta resolves to microseconds; avoid total_seconds() (float, lossy).
-    return ((td.days * 86_400 + td.seconds) * 10**6 + td.microseconds) * 1000
-
-
 def validate_cadence(df: pl.DataFrame, timedelta: datetime.timedelta) -> None:
     # Compare in nanoseconds: casting the gap up is lossless, whereas comparing
     # against the Python timedelta lets polars truncate it to the column's unit.
@@ -45,7 +43,7 @@ def validate_cadence(df: pl.DataFrame, timedelta: datetime.timedelta) -> None:
             .drop_nulls()
             .filter(
                 pl.col("gap").cast(pl.Duration("ns")).cast(pl.Int64)
-                != _exact_nanoseconds(timedelta)
+                != exact_nanoseconds(timedelta)
             )
         )
     except InvalidOperationError as exc:

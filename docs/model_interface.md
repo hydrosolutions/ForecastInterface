@@ -66,6 +66,19 @@ The `inputs` parameters use `ModelInputs`; only `config` is typed `Any` (provisi
 
 The **group-artifact embedding-key / station-set-mismatch contract**, however, is **load-bearing from v1**, because `GROUP` artifacts ship from the start (decision 1.10) and east→west transfer is a Nepal v1 target (decision 1.6) — re-evaluate its earlier Phase 4 deferral. The contract: a `GROUP` artifact **embeds the meaningful station strings it was trained on** (which the model reads to key per-station state); it must define behaviour when the predict-time station set differs from the trained set — **known** stations use stored state, **unknown** stations are generalized from static attributes or rejected with an explicit error — and it must **never silently mis-associate** a prediction with the wrong station. Station strings are **stable, meaningful identifiers** that round-trip unchanged through `serialize_artifact` / `deserialize_artifact` and across deployments; the model never alters them.
 
+### Training time grid
+
+An artifact is trained on stamps with a specific grid (step, origin, label; see `docs/input_requirement.md`, *Time grid*). Declaring it lets a deployment refuse a shifted grid instead of silently producing a wrong forecast.
+
+- **`GridDeclaringArtifact`** — optional `runtime_checkable` extension of `TrainedArtifact` with a `training_grid -> TrainingGridDeclaration` property. `TrainingGridDeclaration` is a small versioned pydantic model (`version`, `grid: TimeGrid | Unknown`) that round-trips through JSON. The declaration **must survive** `serialize_artifact` / `deserialize_artifact`.
+- **`artifact_training_grid(artifact)`** — returns the declaration, or an unknown one for a legacy artifact that does not implement the protocol (or whose property raises). Legacy artifacts read as unknown, never as an error.
+- **Orchestrators should read and persist the declaration at import / train time.** In SAP3 artifacts are deserialized only after the inputs are assembled, so the grid is otherwise unavailable when the inputs are built.
+- **`compatibility(deployment, declared) -> Compatibility`** (`COMPATIBLE` / `MISMATCH` / `UNKNOWN`). Exact equality on step, origin and label, no tolerance. `UNKNOWN` is returned when either side is unknown, or when step and origin agree but a label is `UNKNOWN`. FI never infers an unknown grid and never shifts data.
+- **`require_compatible`** — as above, but raises `GridMismatchError` (a `ValueError` with `.differences`, naming which of `step` / `origin` / `label` differ) on `MISMATCH`. It returns `UNKNOWN` as-is: whether to accept it is an **operator decision**.
+- **`FailureCause.GRID_MISMATCH`** — the cause a model or orchestrator returns in `ModelFailure` for a grid mismatch.
+- **`VariableMetadata.origin` / `label`** (default unknown) echo the grid of an output so a `ModelOutput` is self-describing. When `origin` is declared, every `datetime` in every frame must satisfy `(datetime - UTC midnight) mod timedelta == origin`; the error names the offending value. Unknown origin: no check.
+- **Issue time is deliberately not part of the declaration.** It is a property of the run, not of the training grid.
+
 ### Warm-up and state (state-free in v0)
 
 FI's protocol is **state-free in v0**: `predict` / `hindcast` take no `state` parameter and return no state. This is a deliberate, lightweight default. It rests on separating two things commonly conflated as "warm-up":

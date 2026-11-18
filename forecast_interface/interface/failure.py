@@ -7,3 +7,4 @@ class FailureCause(Enum):
     MODEL_ERROR = auto()
     CONFIGURATION = auto()
     DEPENDENCY = auto()
+    GRID_MISMATCH = auto()

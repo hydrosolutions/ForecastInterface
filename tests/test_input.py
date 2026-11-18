@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from datetime import timedelta
+from typing import Any, TypeAlias
 
 import pytest
 from pydantic import ValidationError
 
-from forecast_interface.common import Unit
+from forecast_interface.common import PeriodLabel, TimeAnchor, Unit, Unknown
 from forecast_interface.input import (
     AggregationMethod,
     DynamicInputSpec,
@@ -362,6 +364,48 @@ class TestSpatialRepresentation:
 # ---------------------------------------------------------------------------
 # InputRequirement
 # ---------------------------------------------------------------------------
+
+
+def _anchored_requirement(
+    step: timedelta, origin: timedelta | Unknown
+) -> InputRequirement:
+    return InputRequirement(
+        targets=_target(),
+        dynamic={
+            step: SpatialInputSpec(
+                data={
+                    SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
+                        past_known={
+                            "obs": {
+                                "discharge": PastKnownVariable(
+                                    unit=Unit.M3_PER_S, lookback=3, max_nan=0
+                                )
+                            }
+                        }
+                    )
+                },
+                anchor=TimeAnchor(origin=origin),
+            )
+        },
+    )
+
+
+class TestInputRequirementAnchor:
+    def test_valid_origin_is_accepted(self) -> None:
+        req = _anchored_requirement(timedelta(days=1), timedelta(hours=18))
+        assert timedelta(days=1) in req.dynamic
+
+    def test_unknown_origin_allows_step_not_dividing_day(self) -> None:
+        req = _anchored_requirement(timedelta(hours=7), Unknown.UNKNOWN)
+        assert timedelta(hours=7) in req.dynamic
+
+    def test_origin_not_below_step_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="origin"):
+            _anchored_requirement(timedelta(hours=3), timedelta(hours=3))
+
+    def test_step_not_dividing_day_with_origin_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="divide 24 hours"):
+            _anchored_requirement(timedelta(hours=7), timedelta(hours=1))
 
 
 class TestInputRequirement:
@@ -763,3 +807,104 @@ class TestFullYamlExample:
         data = full_requirement.model_dump()
         restored = InputRequirement.model_validate(data)
         assert restored == full_requirement
+
+
+# ---------------------------------------------------------------------------
+# Time grid declarations (label / anchor / target aggregation)
+# ---------------------------------------------------------------------------
+
+
+def _past(**kw: Any) -> PastKnownVariable:
+    return PastKnownVariable(lookback=3, max_nan=0, unit=Unit.MM, **kw)
+
+
+def _future(**kw: Any) -> FutureKnownVariable:
+    return FutureKnownVariable(future_steps=3, max_nan=0, unit=Unit.MM, **kw)
+
+
+VariableFactory: TypeAlias = Callable[..., PastKnownVariable | FutureKnownVariable]
+
+
+def _tgt(unit: Unit, **kw: Any) -> TargetSpec:
+    return TargetSpec(
+        unit=unit,
+        representations=frozenset({OutputRepresentation.DETERMINISTIC}),
+        **kw,
+    )
+
+
+class TestVariableLabel:
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_label_defaults_to_none_inheriting(self, make: VariableFactory) -> None:
+        assert make().label is None
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_explicit_label_kept(self, make: VariableFactory) -> None:
+        v = make(aggregation=AggregationMethod.SUM, label=PeriodLabel.END)
+        assert v.label is PeriodLabel.END
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_label_with_point_rejected(self, make: VariableFactory) -> None:
+        with pytest.raises(ValidationError, match="POINT"):
+            make(aggregation=AggregationMethod.POINT, label=PeriodLabel.START)
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_point_without_label_accepted(self, make: VariableFactory) -> None:
+        assert make(aggregation=AggregationMethod.POINT).label is None
+
+    def test_future_assignment_revalidates_label(self) -> None:
+        v = _future(aggregation=AggregationMethod.POINT)
+        with pytest.raises(ValidationError, match="POINT"):
+            v.label = PeriodLabel.END
+
+
+class TestSpatialInputSpecAnchor:
+    def test_anchor_defaults_to_unknown(self) -> None:
+        spec = SpatialInputSpec(
+            data={
+                SpatialRepresentation.BASIN_AVERAGE: DynamicInputSpec(
+                    past_known={"p": {"x": _past()}}
+                )
+            }
+        )
+        assert spec.anchor.origin is Unknown.UNKNOWN
+        assert spec.anchor.label is PeriodLabel.UNKNOWN
+
+    def test_legacy_dump_without_anchor_validates(self) -> None:
+        payload = {
+            "data": {
+                SpatialRepresentation.BASIN_AVERAGE: {
+                    "past_known": {"p": {"x": _past().model_dump()}}
+                }
+            }
+        }
+        assert SpatialInputSpec.model_validate(payload).anchor == TimeAnchor()
+
+
+class TestTargetSpecAggregation:
+    def test_defaults_unknown(self) -> None:
+        t = _tgt(Unit.M3_PER_S)
+        assert t.aggregation is None
+        assert t.label is PeriodLabel.UNKNOWN
+
+    def test_label_with_point_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="POINT"):
+            _tgt(
+                Unit.M3_PER_S,
+                aggregation=AggregationMethod.POINT,
+                label=PeriodLabel.END,
+            )
+
+    @pytest.mark.parametrize("unit", [Unit.M3_PER_S, Unit.MM_PER_DAY, Unit.W_PER_M2])
+    def test_sum_with_rate_unit_rejected(self, unit: Unit) -> None:
+        with pytest.raises(ValidationError, match="rate unit"):
+            _tgt(unit, aggregation=AggregationMethod.SUM)
+
+    def test_mean_with_rate_unit_accepted(self) -> None:
+        _tgt(Unit.M3_PER_S, aggregation=AggregationMethod.MEAN)
+
+    def test_mean_with_accumulated_unit_accepted_for_states(self) -> None:
+        _tgt(Unit.MM, aggregation=AggregationMethod.MEAN)
+
+    def test_sum_with_accumulated_unit_accepted(self) -> None:
+        _tgt(Unit.MM, aggregation=AggregationMethod.SUM)
