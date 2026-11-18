@@ -123,9 +123,9 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Decision:** FI declares and checks the time grid of a trained artifact and of its inputs and outputs, additively and without any calendar framework.
 
-- **Types.** `TimeGrid(step, origin, label)` with `origin` an offset from UTC midnight in whole minutes, `0 <= origin < step`, a step that divides 24 h exactly, and `label: PeriodLabel` (`START` = stamp `t` names `[t, t+step)`, `END` = `(t-step, t]`, `UNKNOWN`). `Unknown.UNKNOWN` is the explicit "not declared" sentinel.
-- **Declaration points.** `TimeAnchor` on the per-step input branch, with a per-variable `label` override that inherits the branch label; `TargetSpec.aggregation` / `label`; `ModelInputs.grid` (on-grid check on the matching branch); `VariableMetadata.origin` / `label` (output phase check); `GridDeclaringArtifact` + `TrainingGridDeclaration` for the artifact.
-- **Comparison.** `compatibility()` / `require_compatible()` / `GridMismatchError`: exact equality on step, origin and label; `UNKNOWN` is returned, never inferred; FI never shifts. `FailureCause.GRID_MISMATCH` reports a refusal. Whether `UNKNOWN` is accepted is an operator decision.
+- **Types.** `TimeGrid(step, origin, label)` with `origin` an offset from UTC midnight in whole minutes, `0 <= origin < step`, a step that divides 24 h exactly, and `label: PeriodLabel` (`START` = stamp `t` names `[t, t+step)`, `END` = stamp `t` names `[t-step, t)`, `UNKNOWN`; the period is the same half-open interval under either label, see `docs/input_requirement.md`, *Time grid*). `Unknown.UNKNOWN` is the explicit "not declared" sentinel.
+- **Declaration points.** `TimeAnchor` on the per-step input branch, with a per-variable `label` override that inherits the branch label; `TargetSpec.aggregation` / `label`; `ModelInputs.grid` (on-grid check on the matching branch); `VariableMetadata.origin` / `label` / `aggregation` (output phase check; `aggregation` echoes the target's declaration so a `ModelOutput` is self-describing, and the orchestrator checks agreement with the target declaration); `GridDeclaringArtifact` + `TrainingGridDeclaration` for the artifact.
+- **Comparison.** `compatibility()` / `require_compatible()` / `GridMismatchError`: exact equality on step, origin and label; `UNKNOWN` is returned, never inferred; FI never shifts. `FailureCause.GRID_MISMATCH` reports a refusal. `require_compatible()` raises only on `MISMATCH` and returns `UNKNOWN` without raising, so a caller that needs certainty must require `Compatibility.COMPATIBLE` explicitly. Whether `UNKNOWN` is accepted is an operator decision.
 - **Aggregation.** `AggregationMethod` gains `MIN` and `POINT` (a sampled value, label meaningless). Targets reject `SUM` with a rate unit; `MEAN` with `mm` / `m` stays legal (SWE, water level).
 
 **Rationale:** raised as FI issue #12 (https://github.com/hydrosolutions/ForecastInterface/issues/12). A model trained on daily means stamped at one phase silently degrades when fed the same step at another. Origin alone is not enough: the same physical day is stamped 18:00Z on its start or on its end, both 18:00 mod 24h, so a label is required to tell `START` from `END`.
@@ -133,7 +133,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 **Limitations.**
 
 - `ModelInputs.grid` checks only the branch keyed by `grid.step`; branches with other steps are not checked, and an unknown grid is not checked. A `TimeGrid` that matches no station's branch at all now raises (a wiring error); stations that individually lack the branch are skipped while at least one has it.
-- A `POINT` variable ignores the inherited branch label (the branch label applies to its windowed variables).
+- A `POINT` variable never inherits the branch label; `effective_label(variable, anchor)` returns `None` for it (the branch label applies to its windowed variables).
 - A step that does not divide 24 h is accepted while the origin is `Unknown`, but rejected once an origin is declared, so declaring a grid later can fail on such a step; otherwise the change is additive.
 
 **Bounded, deliberate difference.** Civil midnight in a UTC+5:45 zone is 18:15Z the previous day, but deployments declare 18:00Z. That 15-minute approximation is accepted as a deliberate, bounded difference, and exact equality refuses it: data imported on 18:15Z is a `MISMATCH` against an 18:00Z declaration, and an orchestrator must resolve it explicitly (re-stamp or retrain). FI does not tolerate or shift.
@@ -141,7 +141,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 **Scope limits.**
 
 - FI declares only **finished products**. Deaccumulation (ICON, ERA5-Land) and forecast-cycle handling belong to the orchestrator.
-- **First / last partial periods and lead-time 0.** A daily model issued mid-period gets a partial first period live but a full one in hindcast. The declaration does not capture this and FI does not check it.
+- **First / last partial periods and lead-time 0.** FI does not declare whether a model's first output period includes its already-elapsed portion. The agreed product is that live and hindcast both produce the whole current-day period; the replacement model must demonstrate this, and a generic FI field is deferred until the training contract is known (issue #12). FI does not check it.
 - **No calendar / DST framework.** A DST deployment picks a fixed-offset UTC boundary and uses its zone for display only.
 - Issue time is not part of the declaration.
 

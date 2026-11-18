@@ -3,7 +3,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from forecast_interface.common.aggregation import AggregationMethod
-from forecast_interface.common.time_grid import PeriodLabel
+from forecast_interface.common.time_grid import PeriodLabel, TimeAnchor
 from forecast_interface.common.units import Unit
 
 
@@ -113,3 +113,11 @@ class FutureKnownVariable(BaseModel):
                 f"future_steps {self.future_steps}"
             )
         return self
+
+
+def effective_label(
+    variable: PastKnownVariable | FutureKnownVariable, anchor: TimeAnchor
+) -> PeriodLabel | None:
+    if variable.aggregation is AggregationMethod.POINT:
+        return None
+    return variable.label if variable.label is not None else anchor.label

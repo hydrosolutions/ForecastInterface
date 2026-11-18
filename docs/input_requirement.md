@@ -174,12 +174,14 @@ A time step alone does not say *which* instants the stamps fall on, nor what a s
 - **origin** — the grid's offset from UTC midnight, a `timedelta` in whole minutes with `0 <= origin < step`. The step must divide 24 h exactly (the grid is anchored to UTC midnight; FI has no calendar framework). Daily data stamped at 18:00Z has `origin=timedelta(hours=18)`. Default `Unknown.UNKNOWN` (not declared; never `None`, never `0`).
 - **label** — a `PeriodLabel`, default `UNKNOWN`:
   - `START` — stamp `t` names the period `[t, t+step)`.
-  - `END` — stamp `t` names the period `(t-step, t]`.
+  - `END` — stamp `t` names the period `[t-step, t)`.
   - `UNKNOWN` — not declared; never treated as either.
 
 Origin alone cannot tell `START` from `END`: the same physical day can be stamped 18:00Z on its start or on its end, both 18:00 mod 24h. Hence the label.
 
-**Per-variable override.** `PastKnownVariable.label` / `FutureKnownVariable.label` override the branch label for that variable (e.g. SUM precipitation stamped `END` beside a `START` temperature). `None` (default) inherits the branch label. Origin is per branch only. A `POINT` variable ignores the inherited branch label (the branch label applies to its windowed variables).
+The physical period is the same half-open interval `[a, b)` (left-closed, right-open, `b = a + step`) under either label; the label only says which endpoint stamps it: `START` stamps `a`, `END` stamps `b`. Changing the label never moves a boundary observation between periods. Example: the Nepal day Wednesday 18 Nov is `[2026-11-17T18:00Z, 2026-11-18T18:00Z)`; `START` stamps it `2026-11-17T18:00Z`, `END` stamps it `2026-11-18T18:00Z`. An observation exactly at 18:00Z on the 17th belongs to that day under both labels, and one exactly at 18:00Z on the 18th belongs to the next day under both labels.
+
+**Per-variable override.** `PastKnownVariable.label` / `FutureKnownVariable.label` override the branch label for that variable (e.g. SUM precipitation stamped `END` beside a `START` temperature). `None` (default) inherits the branch label. Origin is per branch only. A `POINT` variable never inherits the branch label: `effective_label(variable, anchor)` returns `None` for it, otherwise the variable's own `label` if set, else `anchor.label`.
 
 **Step vs. 24 h.** A step that does not divide 24 h is accepted while the origin is `Unknown`, but rejected once an origin is declared (`TimeGrid` requires it). Declaring a grid later can therefore fail on such a step; otherwise the change is additive.
 

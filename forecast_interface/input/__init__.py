@@ -26,6 +26,7 @@ from .variable import (
     FutureKnownVariable,
     HorizonSemantics,
     PastKnownVariable,
+    effective_label,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "TimeAnchor",
     "TimeGrid",
     "Unknown",
+    "effective_label",
 ]

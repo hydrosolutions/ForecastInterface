@@ -10,7 +10,8 @@ _MINUTE = timedelta(minutes=1)
 
 
 class PeriodLabel(Enum):
-    # START: stamp t names [t, t+step); END: stamp t names (t-step, t].
+    # The period is the same half-open [a, b), b = a + step, under either label;
+    # START stamps a, END stamps b (so END stamp t names [t-step, t)).
     START = "start"
     END = "end"
     UNKNOWN = "unknown"

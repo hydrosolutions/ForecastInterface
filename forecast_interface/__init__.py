@@ -1,4 +1,4 @@
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 from .common import (
     AggregationMethod,
@@ -29,6 +29,7 @@ from .input import (
     SpatialRepresentation,
     StationInputs,
     TargetSpec,
+    effective_label,
 )
 from .interface import (
     ArtifactScope,
@@ -70,6 +71,7 @@ __all__ = [
     "Unknown",
     "compatibility",
     "require_compatible",
+    "effective_label",
     "ArtifactScope",
     "GridDeclaringArtifact",
     "artifact_training_grid",

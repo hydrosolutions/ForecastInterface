@@ -1449,3 +1449,39 @@ class TestUtcDtypeAliasMessage:
 
         with pytest.raises(ValueError, match="only the literal 'UTC'"):
             validate_utc_datetime_dtype("datetime", pl.Datetime("us", "Etc/UTC"))
+
+
+class TestVariableMetadataAggregation:
+    def test_defaults_to_unknown(self) -> None:
+        assert _make_metadata().aggregation is Unknown.UNKNOWN
+
+    @pytest.mark.parametrize("method", list(AggregationMethod))
+    def test_each_method_accepted(self, method: AggregationMethod) -> None:
+        assert _make_metadata(aggregation=method).aggregation is method
+
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_point_with_label_rejected(self, label: PeriodLabel) -> None:
+        with pytest.raises(ValueError, match="POINT"):
+            _make_metadata(aggregation=AggregationMethod.POINT, label=label)
+
+    def test_point_with_unknown_label_accepted(self) -> None:
+        meta = _make_metadata(
+            aggregation=AggregationMethod.POINT, label=PeriodLabel.UNKNOWN
+        )
+        assert meta.aggregation is AggregationMethod.POINT
+
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_windowed_aggregation_with_label_accepted(self, label: PeriodLabel) -> None:
+        meta = _make_metadata(aggregation=AggregationMethod.MEAN, label=label)
+        assert meta.label is label
+
+    def test_payload_without_field_validates(self) -> None:
+        meta = VariableMetadata.model_validate(
+            {
+                "unit": Unit.M3_PER_S,
+                "timedelta": timedelta(days=1),
+                "forecast_horizon": 1,
+                "offset": 0,
+            }
+        )
+        assert meta.aggregation is Unknown.UNKNOWN

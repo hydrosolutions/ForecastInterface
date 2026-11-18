@@ -18,6 +18,7 @@ from forecast_interface.input import (
     SpatialInputSpec,
     SpatialRepresentation,
     TargetSpec,
+    effective_label,
 )
 
 DAILY = timedelta(days=1)
@@ -908,3 +909,45 @@ class TestTargetSpecAggregation:
 
     def test_sum_with_accumulated_unit_accepted(self) -> None:
         _tgt(Unit.MM, aggregation=AggregationMethod.SUM)
+
+
+class TestEffectiveLabel:
+    @pytest.mark.parametrize("make", [_past, _future])
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_point_is_not_applicable_under_any_branch_label(
+        self, make: VariableFactory, label: PeriodLabel
+    ) -> None:
+        v = make(aggregation=AggregationMethod.POINT)
+        assert effective_label(v, TimeAnchor(label=label)) is None
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_windowed_inherits_branch_label(
+        self, make: VariableFactory, label: PeriodLabel
+    ) -> None:
+        v = make(aggregation=AggregationMethod.SUM)
+        assert effective_label(v, TimeAnchor(label=label)) is label
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_explicit_override_wins(self, make: VariableFactory) -> None:
+        v = make(aggregation=AggregationMethod.SUM, label=PeriodLabel.END)
+        assert (
+            effective_label(v, TimeAnchor(label=PeriodLabel.START)) is PeriodLabel.END
+        )
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_convention_default_aggregation_inherits(
+        self, make: VariableFactory
+    ) -> None:
+        v = make()
+        assert v.aggregation is None
+        assert (
+            effective_label(v, TimeAnchor(label=PeriodLabel.START)) is PeriodLabel.START
+        )
+
+    @pytest.mark.parametrize("make", [_past, _future])
+    def test_explicit_label_with_point_still_rejected(
+        self, make: VariableFactory
+    ) -> None:
+        with pytest.raises(ValidationError, match="POINT"):
+            make(aggregation=AggregationMethod.POINT, label=PeriodLabel.END)

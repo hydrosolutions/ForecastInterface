@@ -2,6 +2,7 @@ import datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from forecast_interface.common.aggregation import AggregationMethod
 from forecast_interface.common.time_grid import (
     PeriodLabel,
     Unknown,
@@ -20,6 +21,7 @@ class VariableMetadata(BaseModel):
     offset: int  # Number of time steps of length timedelta between the last observed data point and the first forecasted data point
     origin: datetime.timedelta | Unknown = Unknown.UNKNOWN
     label: PeriodLabel = PeriodLabel.UNKNOWN
+    aggregation: AggregationMethod | Unknown = Unknown.UNKNOWN
 
     @field_validator("forecast_horizon")
     @classmethod
@@ -51,4 +53,13 @@ class VariableMetadata(BaseModel):
                 raise ValueError(
                     f"origin must satisfy 0 <= origin < timedelta, got {self.origin}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _label_matches_aggregation(self) -> "VariableMetadata":
+        if (
+            self.aggregation is AggregationMethod.POINT
+            and self.label is not PeriodLabel.UNKNOWN
+        ):
+            raise ValueError("label is meaningless with POINT aggregation")
         return self
