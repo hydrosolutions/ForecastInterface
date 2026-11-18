@@ -172,6 +172,11 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
    could not: `.diff().over(...)` emits a null gap for a null timestamp, which `.drop_nulls()` then
    swallows, so a null `datetime` slipped past an otherwise strict cadence validator.
 
+Behavior changes to note: a present but **empty** `epistemic_uncertainty` frame was previously
+accepted and is now rejected, and the cadence errors now name the offending `issue_datetime` group and
+the `datetime` of the row where the gap occurs (unsorted rows and out-of-range gaps get their own
+messages).
+
 **Not taken: Q6 cross-validator.** A strict per-row check — every row's `issue_datetime` equals
 `ModelOutput.issue_datetime` — was implemented alongside the above and then **pulled**, because it
 makes `BatchHindcastModel` unimplementable. `hindcast` takes a `Sequence[datetime]` of issue times

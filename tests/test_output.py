@@ -891,7 +891,7 @@ class TestVariableOutput:
                 "value": [1.0, 2.0, 3.0],
             }
         )
-        with pytest.raises(ValueError, match="spacing must equal"):
+        with pytest.raises(ValueError, match="must be sorted ascending by datetime"):
             VariableOutput(
                 metadata=_make_metadata(forecast_horizon=3),
                 deterministic=DeterministicData(data=df),
@@ -1386,3 +1386,66 @@ class TestVariableOutputPhase:
             }
         )
         assert vo.metadata.origin is Unknown.UNKNOWN
+
+
+class TestCadenceErrorLocation:
+    def test_data_gap_beyond_nanosecond_range_blames_the_data(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 2,
+                "datetime": [
+                    datetime.datetime(1000, 1, 1, tzinfo=_UTC),
+                    datetime.datetime(9000, 1, 1, tzinfo=_UTC),
+                ],
+                "value": [1.0, 2.0],
+            }
+        )
+        with pytest.raises(ValueError, match="gap at issue_datetime 2024-01-01 06:00"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_data_gap_beyond_range_says_out_of_representable_range(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 2,
+                "datetime": [
+                    datetime.datetime(1000, 1, 1, tzinfo=_UTC),
+                    datetime.datetime(9000, 1, 1, tzinfo=_UTC),
+                ],
+                "value": [1.0, 2.0],
+            }
+        )
+        with pytest.raises(ValueError, match="out of representable range"):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=2),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_spacing_error_names_group_and_row(self) -> None:
+        df = pl.DataFrame(
+            {
+                "issue_datetime": [_ISSUE_DT] * 3,
+                "datetime": [_DT1, _DT1 + timedelta(days=1), _DT1 + timedelta(days=3)],
+                "value": [1.0, 2.0, 3.0],
+            }
+        )
+        with pytest.raises(
+            ValueError, match=r"issue_datetime 2024-01-01 06:00.*datetime 2024-01-04"
+        ):
+            VariableOutput(
+                metadata=_make_metadata(forecast_horizon=3),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+
+class TestUtcDtypeAliasMessage:
+    def test_alias_time_zone_rejected_with_literal_utc_hint(self) -> None:
+        from forecast_interface.common import validate_utc_datetime_dtype
+
+        with pytest.raises(ValueError, match="only the literal 'UTC'"):
+            validate_utc_datetime_dtype("datetime", pl.Datetime("us", "Etc/UTC"))

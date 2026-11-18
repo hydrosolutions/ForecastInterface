@@ -1,6 +1,6 @@
 from .aggregation import AggregationMethod
 from .resolutions import SpatialRepresentation
-from .temporal import validate_utc_datetime_dtype
+from .temporal import UtcDatetime, validate_utc_datetime_dtype
 from .time_grid import (
     Compatibility,
     GridDeclaration,
@@ -29,6 +29,7 @@ __all__ = [
     "TrainingGridDeclaration",
     "Unit",
     "Unknown",
+    "UtcDatetime",
     "compatibility",
     "require_compatible",
     "validate_divides_day",
