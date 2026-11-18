@@ -26,14 +26,19 @@ See the [Input Requirement Specification](docs/input_requirement.md) for the ful
 ## Usage
 
 ```python
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import polars as pl
 from forecast_interface import (
     ModelOutput, VariableOutput, VariableMetadata,
     DeterministicData, Unit, VariableStatus,
 )
 
-issue_dt = datetime(2024, 6, 1, 6, 0)
+# Datetimes are timezone-aware UTC throughout — tz-naive frames are rejected.
+issue_dt = datetime(2024, 6, 1, 6, 0, tzinfo=UTC)
+# offset=1: the first forecast step is one timedelta after the last observation
+# (here the observation at the issue time), so valid times are 06-02 and 06-03.
+valid_times = [issue_dt + timedelta(days=n) for n in (1, 2)]
+
 output = ModelOutput(
     model_name="MyModel",
     issue_datetime=issue_dt,
@@ -44,12 +49,12 @@ output = ModelOutput(
                     unit=Unit.M3_PER_S,
                     timedelta=timedelta(days=1),
                     forecast_horizon=2,
-                    offset=0,
+                    offset=1,
                 ),
                 deterministic=DeterministicData(
                     data=pl.DataFrame({
                         "issue_datetime": [issue_dt, issue_dt],
-                        "datetime": [datetime(2024, 6, 1), datetime(2024, 6, 2)],
+                        "datetime": valid_times,
                         "value": [42.0, 43.5],
                     }),
                 ),

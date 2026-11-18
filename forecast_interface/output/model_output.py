@@ -1,6 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    computed_field,
+    field_validator,
+)
 
 from .status import VariableStatus
 from .variable_output import VariableOutput
@@ -14,7 +20,7 @@ class ModelOutput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str
-    issue_datetime: datetime
+    issue_datetime: AwareDatetime
     # PROVISIONAL (Q1): station ids are opaque strings; the SAP3 adapter maps them to/from typed StationId (UUID).
     variables: dict[str, dict[str, VariableOutput]]
 
@@ -23,6 +29,13 @@ class ModelOutput(BaseModel):
     def _non_empty_model_name(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("model_name must be a non-empty string")
+        return v
+
+    @field_validator("issue_datetime")
+    @classmethod
+    def _utc_issue_datetime(cls, v: datetime) -> datetime:
+        if v.utcoffset() != timedelta(0):
+            raise ValueError(f"issue_datetime must be UTC, got offset {v.utcoffset()}")
         return v
 
     @field_validator("variables")

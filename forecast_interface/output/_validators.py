@@ -1,7 +1,11 @@
+import datetime
+
 import polars as pl
+from polars.exceptions import InvalidOperationError
+
+from forecast_interface.common.temporal import validate_utc_datetime_dtype
 
 
-DATETIME_DTYPE = pl.Datetime
 NUMERIC_DTYPES = (
     pl.Float32,
     pl.Float64,
@@ -22,8 +26,37 @@ def validate_temporal_columns(df: pl.DataFrame) -> None:
     for col in TEMPORAL_COLUMNS:
         if col not in df.columns:
             raise ValueError(f"DataFrame must contain a '{col}' column")
-        if not isinstance(df.schema[col], DATETIME_DTYPE):
-            raise ValueError(f"'{col}' column must be Datetime, got {df.schema[col]}")
+        validate_utc_datetime_dtype(col, df.schema[col])
+        if df[col].is_null().any():
+            raise ValueError(f"'{col}' values must not be null")
+
+
+def _exact_nanoseconds(td: datetime.timedelta) -> int:
+    # timedelta resolves to microseconds; avoid total_seconds() (float, lossy).
+    return ((td.days * 86_400 + td.seconds) * 10**6 + td.microseconds) * 1000
+
+
+def validate_cadence(df: pl.DataFrame, timedelta: datetime.timedelta) -> None:
+    # Compare in nanoseconds: casting the gap up is lossless, whereas comparing
+    # against the Python timedelta lets polars truncate it to the column's unit.
+    try:
+        gaps = (
+            df.select(pl.col("datetime").diff().over("issue_datetime").alias("gap"))
+            .drop_nulls()
+            .filter(
+                pl.col("gap").cast(pl.Duration("ns")).cast(pl.Int64)
+                != _exact_nanoseconds(timedelta)
+            )
+        )
+    except InvalidOperationError as exc:
+        raise ValueError(
+            f"cadence out of representable range for the declared timedelta {timedelta}"
+        ) from exc
+    if gaps.height:
+        raise ValueError(
+            f"'datetime' spacing must equal the declared timedelta {timedelta} "
+            f"within each issue_datetime group, got {gaps['gap'][0]}"
+        )
 
 
 def validate_numeric_columns(df: pl.DataFrame, columns: list[str]) -> None:

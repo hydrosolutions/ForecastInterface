@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import Random
 from typing import Any
 
@@ -37,8 +37,8 @@ from forecast_interface.output import (
     VariableStatus,
 )
 
-_ISSUE_DT = datetime(2024, 1, 1, 0, 0)
-_DT1 = datetime(2024, 1, 2, 0, 0)
+_ISSUE_DT = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+_DT1 = datetime(2024, 1, 2, 0, 0, tzinfo=timezone.utc)
 
 
 def _make_model_output() -> ModelOutput:
@@ -167,6 +167,35 @@ class TestModelFailure:
                 cause=FailureCause.RESOURCE,
                 message="some error",
             )
+
+    def test_naive_issue_datetime_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="should have timezone info"):
+            ModelFailure(
+                model_name="my_model",
+                issue_datetime=datetime(2024, 1, 1, 0, 0),
+                cause=FailureCause.INPUT_DATA,
+                message="some error",
+            )
+
+    def test_non_utc_issue_datetime_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="issue_datetime must be UTC"):
+            ModelFailure(
+                model_name="my_model",
+                issue_datetime=datetime(
+                    2024, 1, 1, 0, 0, tzinfo=timezone(timedelta(hours=5, minutes=45))
+                ),
+                cause=FailureCause.INPUT_DATA,
+                message="some error",
+            )
+
+    def test_utc_issue_datetime_accepted(self) -> None:
+        failure = ModelFailure(
+            model_name="my_model",
+            issue_datetime=_ISSUE_DT,
+            cause=FailureCause.INPUT_DATA,
+            message="some error",
+        )
+        assert failure.issue_datetime == _ISSUE_DT
 
     def test_empty_message_rejected(self) -> None:
         with pytest.raises(

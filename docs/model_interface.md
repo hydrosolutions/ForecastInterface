@@ -130,6 +130,10 @@ All data classes share a unified DataFrame schema with two required datetime col
 | `issue_datetime` | `datetime` (UTC) | When the forecast/hindcast was issued |
 | `datetime` | `datetime` (UTC) | The target valid time of the prediction |
 
+**UTC is enforced, not assumed.** Both columns must be `pl.Datetime` with `time_zone="UTC"`; tz-naive or non-UTC frames are **rejected**. `ModelOutput.issue_datetime` must likewise be a timezone-aware UTC `datetime`. A producer working in local time converts once at the boundary — `.dt.convert_time_zone("UTC")`. Null values in either column are **rejected**, matching the input side.
+
+**Cadence must match the declaration.** Within each `issue_datetime` group, consecutive `datetime` values must be spaced by exactly `VariableMetadata.timedelta`. Non-uniform spacing is **rejected** — `forecast_horizon` and `offset` are counts of that step and have no meaning otherwise; strictly-increasing order follows from the check. **A single-step output is exempt:** one row per issue group has no measurable spacing and passes.
+
 **Forecast** (`predict`): `issue_datetime` is constant across all rows (a single issue time).
 **Batch hindcast** (`BatchHindcastModel.hindcast`): `issue_datetime` **varies** across rows (one block of rows per issue time in the batch).
 

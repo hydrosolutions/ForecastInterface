@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import polars as pl
 import pytest
@@ -16,8 +16,8 @@ from forecast_interface.input import (
 
 DAILY = timedelta(days=1)
 HOURLY = timedelta(hours=1)
-DT1 = datetime(2024, 1, 1)
-DT2 = datetime(2024, 1, 2)
+DT1 = datetime(2024, 1, 1, tzinfo=UTC)
+DT2 = datetime(2024, 1, 2, tzinfo=UTC)
 
 
 def _single_df() -> pl.DataFrame:
@@ -87,6 +87,25 @@ class TestInputSeries:
         with pytest.raises(ValidationError, match="'datetime' column must be Datetime"):
             InputSeries(unit=Unit.M3_PER_S, data=df)
 
+    def test_naive_datetime_rejected(self) -> None:
+        df = pl.DataFrame({"datetime": [datetime(2024, 1, 1)], "value": [1.0]})
+
+        with pytest.raises(ValidationError, match="timezone-aware UTC"):
+            InputSeries(unit=Unit.M3_PER_S, data=df)
+
+    def test_non_utc_zone_rejected(self) -> None:
+        df = pl.DataFrame(
+            {"datetime": pl.Series([DT1]).dt.convert_time_zone("Europe/Zurich")}
+        ).with_columns(value=pl.lit(1.0))
+
+        with pytest.raises(ValidationError, match="timezone-aware UTC"):
+            InputSeries(unit=Unit.M3_PER_S, data=df)
+
+    def test_utc_datetime_accepted(self) -> None:
+        series = _series()
+
+        assert series.data.schema["datetime"] == pl.Datetime("us", "UTC")
+
     def test_issue_datetime_column_rejected_by_name(self) -> None:
         df = pl.DataFrame(
             {
@@ -104,7 +123,9 @@ class TestInputSeries:
     def test_null_datetime_rejected(self) -> None:
         df = pl.DataFrame(
             {
-                "datetime": pl.Series("datetime", [DT1, None], dtype=pl.Datetime),
+                "datetime": pl.Series(
+                    "datetime", [DT1, None], dtype=pl.Datetime(time_zone="UTC")
+                ),
                 "value": [1.0, 2.0],
             }
         )
@@ -114,7 +135,7 @@ class TestInputSeries:
 
     def test_empty_rows_rejected(self) -> None:
         df = pl.DataFrame(
-            schema={"datetime": pl.Datetime, "value": pl.Float64},
+            schema={"datetime": pl.Datetime(time_zone="UTC"), "value": pl.Float64},
         )
 
         with pytest.raises(
