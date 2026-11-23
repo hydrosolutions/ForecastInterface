@@ -119,6 +119,22 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Reflected in:** `docs/model_interface.md`.
 
+## 1.19 Optional versioned provenance record and modeller-run conformance checker (FI issue #16) — PROPOSED, implementation in progress
+
+**Decision:** FI proposes two additions, optional for modellers: a versioned provenance record that can travel inside a trained artifact (or in a sidecar manifest bound by SHA-256), and a conformance checker (`uv run fi-check ...`) a modeller runs once against their own model, artifact and fixtures, reporting PASS / FAIL / NOT_TESTED in text and JSON. Nothing here changes what a modeller owes today; a model supplying no provenance is conformant.
+
+1. **Optional in FI conformance.** Only a deployment profile (e.g. a consumer's import step) may require provenance.
+2. **SHA-256 binding only.** Integrity, not authorship; signing can be added later without a schema change.
+3. **Early-stopping and validation windows count as exposure**, as do windows used to fit preprocessing. Exposure is a list of per-stage windows with a station or region scope, not a single date range.
+4. **Config identity is an optional FI field** (named algorithm plus digest); a consumer's own config hash stays separate.
+5. **Four times, never conflated:** checkpoint creation, training completion, export (in FI) and import (consumer-side, not in FI).
+6. **Unknown stays explicit.** Every field is a known value or `Unknown(reason)` (`NOT_SUPPLIED`, `UNRECOVERABLE`, `NOT_APPLICABLE`); Unknown never implies independent evaluation and is never filled from file modification times.
+7. **Release:** target v0.3.0 together with #12 (decision 1.18), followed by coordinated downstream bumps. Not bundled: #10, #11, #15.
+
+**Status:** proposed, implementation in progress. Checks the docs describe as orchestrator duties (inputs valid against `InputRequirement`, explicit `FAILURE` entries for missing stations) would be checked by the conformance checker once landed.
+
+**Reflected in:** `forecast_interface/interface/artifact.py` (deferral note); code not yet implemented.
+
 ## 1.18 Training time grid declaration — RESOLVED (pending review)
 
 **Decision:** FI declares and checks the time grid of a trained artifact and of its inputs and outputs, additively and without any calendar framework.
@@ -150,7 +166,7 @@ Banded Snowmapper SWE / snowmelt is declared at `ELEVATION_BAND`.
 
 **Adoption:** lockstep with SAP3 and aquacast, which pin FI by exact tag. There is no release until that is coordinated.
 
-**Open (awaiting Sandro):** the aquacast-side checklist (grid and label of trained artifacts, instantaneous or mixed-label inputs, non-daily steps, whether artifacts can embed the declaration, label granularity) lives in the issue #12 thread, which is the single source for these questions.
+**Answered:** the aquacast-side questions (grid and label of trained artifacts, instantaneous or mixed-label inputs, non-daily steps, whether artifacts can embed the declaration, label granularity) are answered; see issue #12 and PR #14.
 
 **Reflected in:** `docs/input_requirement.md`, `docs/model_interface.md`, and code.
 
@@ -386,11 +402,11 @@ one.
 
 - The same station string must be used consistently across **train → artifact → predict → output**.
 - The model may **read** the key (look it up in its artifact) but must **never alter** it; output is keyed by exactly the strings received.
-- The string must be **stable across deployments** (staging → prod, east → west), because artifacts embed it and must be portable. **Resolved (Q10):** the key is the **station / gauge code**, not a per-DB UUID; the SAP3 adapter maps `StationId` (UUID) ↔ code (via `StationConfig.code`). Residual: Sandro confirms his trained artifacts key on the code.
+- The string must be **stable across deployments** (staging → prod, east → west), because artifacts embed it and must be portable. **Resolved (Q10):** the key is the **station / gauge code**, not a per-DB UUID; the SAP3 adapter maps `StationId` (UUID) ↔ code (via `StationConfig.code`). Answered from the aquacast code (Q10).
 
 **Group support from v1:** `ArtifactScope.GROUP` is load-bearing from the start (consistent with 1.6). Multiple input stations may **share one group artifact**; output stays **1:1 station-in / station-out** — every input station gets an output entry. Grouping is about *artifact sharing*, not output cardinality.
 
-**Station-set mismatch (known vs unknown stations):** a GROUP artifact stores its trained member stations. At predict time, **known** stations use the stored per-station state; **unknown** stations (e.g. western gauges under east→west transfer) must be handled by **generalizing from static attributes or raising an explicit error — never silently mis-associating** a prediction with the wrong station / embedding. This is the embedding-key contract (Nepal §8). **Timing flag:** decision 1.6 puts east→west in Nepal v1 and groups ship from the start, so this contract is likely **v1, not Phase 4** — re-evaluate the deferral.
+**Station-set mismatch (known vs unknown stations):** a GROUP artifact stores its trained member stations. At predict time, **known** stations use the stored per-station state; **unknown** stations (e.g. western gauges under east→west transfer) must be handled by **generalizing from static attributes or raising an explicit error — never silently mis-associating** a prediction with the wrong station / embedding. This is the embedding-key contract (Nepal §8). **Status:** a documented duty, not yet typed or enforced (no accessor for the trained station set in code; `artifact.py` defers it). Decision 1.6 puts east→west in Nepal v1 and groups ship from the start, so it matters from v1.
 
 **Reflected in:** `docs/model_interface.md`.
 
@@ -398,7 +414,7 @@ one.
 
 **Decision:**
 - Replace `Any` for `inputs` with a **concrete FI-owned input-bundle type** (working name `ModelInputs`), **isomorphic to `InputRequirement`**: addressed by the same `(TemporalResolution → SpatialRepresentation → {past_known | future_known} → product → variable)` keys, leaves being the actual time-series DataFrames, plus `static` and the issue context. It is **station-aware** to match the station-keyed output (decision 1.1) for GROUP models. The SAP3 adapter builds it from SAP3's `StationInputData` / `GroupModelInputs`; FI does **not** import SAP3 types.
-- "Parse, don't validate": the bundle the model receives is **valid-by-construction** against its declared `InputRequirement`.
+- "Parse, don't validate": the bundle is intended to be **valid against its declared `InputRequirement`**. FI code does not check this; it is an **orchestrator duty** (and, once landed, checked by the conformance checker proposed in decision 1.19 / issue #16).
 
 **v1 delivery scope (model developer input):**
 - **Temporal resolution:** daily, hourly, or daily + hourly — all delivered in v1.
@@ -406,7 +422,7 @@ one.
 - **Product axis:** structure retained, but **v1 delivers a single product per variable.** Multi-product is a future extension (non-breaking — the product dict simply gains keys).
 - The un-delivered dimensions (GRIDDED, multi-product) are SAP3's delivery growth backlog.
 
-**`config` (train / predict): OPEN — modeller-owned** (see Q8). Until specified, `config` stays `Any`.
+**`config` (train / retrain):** an opaque `Mapping[str, Any]`; `RunConfig` is the optional generic subset (see Q8).
 
 **Reflected in:** `docs/input_requirement.md`, and the `ModelInputs` type (code).
 
@@ -418,10 +434,10 @@ This section is the single place for what we need from / owe to the model develo
 
 ## Still open — needs your input
 
-- **`config` contents (Q8)** — Sandro must enumerate the train-time config before we partition ownership and type it. *(The main open item.)*
-- **Availability-lag values (Q9)** — mechanism settled (reduced per-variable `future_steps`); the concrete SnowMapper step-counts are owed by Sandro / data availability.
-- **Training time grid (decision 1.18, issue #12)** — Sandro answers the checklist in the issue #12 thread.
-- **Station-code confirmation (Q10)** — key decided (station code); Sandro confirms his artifacts key on it (re-key if not).
+- **`config` contents (Q8)** — answered from the aquacast code.
+- **Availability-lag values (Q9)** — mechanism decided; step counts are a deployment fact owned by whoever runs SnowMapper, not asked of the aquacast owner.
+- **Training time grid (decision 1.18, issue #12)** — answered; see issue #12 and PR #14.
+- **Station key (Q10)** — answered from the aquacast code.
 
 ## Deviations from the original proposal — please confirm
 
@@ -442,7 +458,7 @@ A decision-ready list. Each needs the model developer's input before the corresp
 
 ### Q1 — Station ID typing — ANSWERED
 
-**Answer:** opaque `str` keys (not typed UUIDs), but they **carry meaning and are stable** across train / predict / deployment — the trained station strings are stored inside the artifact and read by the model for per-station lookup. Group artifacts shared across multiple stations are supported **from v1**; output is **1:1 station-in / station-out**; the station-set-mismatch case (unknown stations) is handled by the embedding-key contract (generalize or raise, never silent). **Residual:** resolved to the **station code** (Q10 / decision 1.10); Sandro confirms his artifacts key on it.
+**Answer:** opaque `str` keys (not typed UUIDs), but they **carry meaning and are stable** across train / predict / deployment — the trained station strings are stored inside the artifact and read by the model for per-station lookup. Group artifacts shared across multiple stations are supported **from v1**; output is **1:1 station-in / station-out**; the station-set-mismatch case (unknown stations) is handled by the embedding-key contract (generalize or raise, never silent). **Residual:** resolved to the **station code** (Q10 / decision 1.10); confirmed from the aquacast code.
 
 ### Q2 — Past-target availability — ANSWERED
 
@@ -464,7 +480,9 @@ A decision-ready list. Each needs the model developer's input before the corresp
 
 **Reflected in:** `docs/model_interface.md`.
 
-### Q6 — Per-row `issue_datetime` column — ANSWERED IN PRINCIPLE, NOT IMPLEMENTABLE (scoped by decision 1.8)
+### Q6 — Per-row `issue_datetime` column — SUPERSEDED by decision 1.17 and issue #15
+
+**Superseded:** the strict cross-validator was pulled (decision 1.17); the shape question is tracked in issue #15. The text below is kept as history.
 
 The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` and renames the per-row datetime column → `valid_time`. The question is whether to **keep the per-row `issue_datetime` column requirement** — with a cross-validator that it matches the top-level `issue_datetime` for forecasts — or **relax it**. Frame this as a validator question, not a removal: the column is not "dropped", it is renamed and re-used.
 
@@ -472,15 +490,17 @@ The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` a
 
 **Implementation attempted and pulled (decision 1.17).** The strict-equality half was written as an unconditional `ModelOutput` validator and removed again: it makes `BatchHindcastModel` unimplementable. `hindcast` takes a `Sequence[datetime]` and returns one `ModelResult`, whose `ModelSuccess` holds one `ModelOutput` with one scalar `issue_datetime` — so a batch over N issue times *must* emit one output whose rows carry N distinct per-row values, exactly what strict equality forbids. The set-membership half cannot stand in: it needs a declared list of issue times on `ModelOutput`, and there is no such field. **Do not retry the validator as-is.** The answer above stands in principle; it is simply not implementable against the current `ModelOutput` shape, so the *shape* question is what remains open (see decision 1.17). Settle the shape first — either `ModelOutput` gains an `issue_datetimes` declaration, or `hindcast` returns a sequence of results — then decide.
 
-### Q8 — `config` contents — OPEN (awaiting Sandro, then partition)
+### Q8 — `config` contents — ANSWERED (from the aquacast code)
 
 `config` is passed to **`train` / `retrain` only** — `predict` / `hindcast` take no `config`.
 
-**Resolution process (two steps):**
+**Answer:** aquacast `TrainerConfig`, `EarlyStopping` and finetune settings are model-private (opaque to FI / SAP3). The shared keys are the four `RunConfig` fields: `quantile_levels`, `num_samples`, `num_weight_samples`, `num_trajectories`. `config` is an opaque `Mapping[str, Any]`; `RunConfig` is the optional generic subset.
+
+**Original resolution process (history):**
 1. **Sandro enumerates** what the model puts in `config` at train time — hyperparameters, the **quantile levels** it emits, trajectory/sample count, validation-split date, early-stopping criteria, etc. (Not forecast horizon — the model owns that, decision 1.15. Not seeds — `rng` is injected.)
 2. **We partition** each field into **model-private** (opaque to FI/SAP3) vs **operationally-shared** (FI/SAP3 needs to read or set it). The likely shared candidate is the **quantile levels** (SAP3 may need specific quantiles for danger thresholds).
 
-**Interim typing:** `config` stays `Any` until the partition is known; the expected end state is an opaque `dict[str, Any]` for model-private params (mirroring SAP3's `ModelParams`), with any operationally-shared fields lifted into a typed slot. (decision 1.9)
+**Typing:** opaque `Mapping[str, Any]` for model-private params (mirroring SAP3's `ModelParams`), with `RunConfig` as the optional generic subset. (decision 1.9)
 
 ### Q7 — SnowMapper lead times — ANSWERED (with caveat)
 
@@ -490,16 +510,16 @@ The adapter maps `ModelOutput.issue_datetime` → `ForecastEnsemble.issued_at` a
 
 **Reflected in:** `docs/input_requirement.md`, decision 1.6.
 
-### Q9 — Per-product availability lag — RESOLVED (mechanism); values owed
+### Q9 — Per-product availability lag — RESOLVED (mechanism decided)
 
 Products derived downstream (e.g. SnowMapper SWE / RoF, which run *after* their driving ECMWF forecast) become available **later** than their nominal forcing — at issue time T their future-known series reaches fewer steps ahead than the ECMWF series driving them.
 
 **Mechanism — option (b):** represent the lag as **reduced per-variable `future_steps`** (the lagging product simply declares fewer future steps than its driving forcing, e.g. ECMWF precip `future_steps=15` vs SnowMapper SWE `future_steps=13`), with `max_nan` absorbing any residual ragged tail. **No dedicated `availability_lag` field** — it would be speculative complexity; the existing per-variable knobs already express the shorter-future-coverage case. If a genuine *leading-gap / offset* case ever appears that `future_steps` can't express, add the field then (additive, non-breaking).
 
-**Still owed (Sandro / data availability):** the concrete step counts — how many fewer future steps SnowMapper SWE / ROF actually cover vs. the ECMWF horizon.
+**Step counts:** a deployment fact owned by whoever runs SnowMapper; not asked of the aquacast owner.
 
-### Q10 — Station-string identity — RESOLVED (station code)
+### Q10 — Station-string identity — ANSWERED (station code, from the aquacast code)
 
 **Decision:** the station key is the **station / gauge code** (the deployment-stable human / network identifier), **not** a per-DB UUID. The UUID stays internal to SAP3; its adapter maps `StationId` (UUID) ↔ code (via `StationConfig.code`) at the boundary. Chosen for portability — the artifact embeds these strings, and they must survive staging → prod and east → west transfer, where UUIDs are not stable across databases but codes are.
 
-**Residual (Sandro):** confirm his already-trained artifacts key on the station code (and re-key if they currently use a UUID / internal id).
+**Answer (aquacast code):** aquacast artifacts key stations on gauge codes in `BundleMeta.train_basins`; there are no UUIDs, and provider codes are region-prefixed.

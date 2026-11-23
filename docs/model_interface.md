@@ -19,7 +19,7 @@ Produce a `TrainedArtifact` from training inputs. See the Training & Lifecycle P
 
 ## Training & Lifecycle Protocol
 
-> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; only `config` remains **provisional** — typed `Any` until the model-config type is co-designed with SAP3 (Q8). Rich `TrainedArtifact` provenance metadata is **deferred to Phase 4**; the group-artifact embedding-key / station-set-mismatch contract is **v1 load-bearing** (see the `TrainedArtifact` section below and decision 1.10).
+> **Status: implemented** in `forecast_interface/interface/` (`protocol.py`, `scope.py`, `artifact.py`). The `inputs` parameters use FI-owned `ModelInputs`; `config` is an opaque `Mapping[str, Any]` that each model self-validates; `RunConfig` is the optional generic subset (Q8). Rich `TrainedArtifact` provenance metadata is **deferred to Phase 4** (optional versioned record proposed in decision 1.19 / issue #16); the group-artifact embedding-key / station-set-mismatch contract is a **documented duty, not yet typed or enforced** (see the `TrainedArtifact` section below and decision 1.10).
 
 ### Scope: `ArtifactScope`
 
@@ -48,7 +48,7 @@ A "national-group" model is a `GROUP` (it is just a group whose station set happ
 | `deserialize_artifact` | `deserialize_artifact(raw: bytes) -> TrainedArtifact` | `ForecastModel` | Inverse of `serialize_artifact`. |
 | `retrain` | `retrain(base_artifact, inputs, *, config, rng) -> TrainedArtifact` | `RetrainableModel` | **Optional.** Warm-start from an existing artifact, for models capable of it. Models that cannot warm-start simply do not implement it; callers fall back to `train`. |
 
-The `inputs` parameters use `ModelInputs`; only `config` is typed `Any` (provisional, see status note above).
+The `inputs` parameters use `ModelInputs`; `config` is an opaque `Mapping[str, Any]`; `RunConfig` is the optional generic subset (see status note above).
 
 ### Determinism (dependency injection)
 
@@ -64,7 +64,7 @@ The `inputs` parameters use `ModelInputs`; only `config` is typed `Any` (provisi
 
 **Partly deferred.** Rich provenance metadata (scope, region, training period, hashes, seed, product versions) is **not** part of the marker Protocol yet and lands in Phase 4.
 
-The **group-artifact embedding-key / station-set-mismatch contract**, however, is **load-bearing from v1**, because `GROUP` artifacts ship from the start (decision 1.10) and east→west transfer is a Nepal v1 target (decision 1.6) — re-evaluate its earlier Phase 4 deferral. The contract: a `GROUP` artifact **embeds the meaningful station strings it was trained on** (which the model reads to key per-station state); it must define behaviour when the predict-time station set differs from the trained set — **known** stations use stored state, **unknown** stations are generalized from static attributes or rejected with an explicit error — and it must **never silently mis-associate** a prediction with the wrong station. Station strings are **stable, meaningful identifiers** that round-trip unchanged through `serialize_artifact` / `deserialize_artifact` and across deployments; the model never alters them.
+The **group-artifact embedding-key / station-set-mismatch contract** is a **documented duty, not yet typed or enforced** (FI has no accessor for the trained station set and `artifact.py` defers it). It matters from v1, because `GROUP` artifacts ship from the start (decision 1.10) and east→west transfer is a Nepal v1 target (decision 1.6) — re-evaluate its earlier Phase 4 deferral. The contract: a `GROUP` artifact **embeds the meaningful station strings it was trained on** (which the model reads to key per-station state); it must define behaviour when the predict-time station set differs from the trained set — **known** stations use stored state, **unknown** stations are generalized from static attributes or rejected with an explicit error — and it must **never silently mis-associate** a prediction with the wrong station. Station strings are **stable, meaningful identifiers** that round-trip unchanged through `serialize_artifact` / `deserialize_artifact` and across deployments; the model never alters them.
 
 ### Training time grid
 
@@ -106,12 +106,12 @@ Failure is represented at **two levels**, with a strict rule for which to use:
 
 | Level | Type | Means | When |
 |---|---|---|---|
-| Whole-run | `ModelFailure` (the union branch) | the model produced **nothing at all** | no artifact, invalid config, dependency down, whole input bundle malformed |
+| Whole-run | `ModelFailure` (the union branch) | the model produced **nothing at all** | dependency down, whole input bundle malformed. (No artifact or invalid config: `train` / `retrain` currently raise, since they return an artifact, not a `ModelResult`; a typed failure is proposed in issue #10.) |
 | Per-station / variable | `VariableStatus.FAILURE` inside `ModelOutput` | the model ran and produced output for some stations/variables, but **this one** could not | that station's inputs missing or too degraded |
 
 **Rule:** if the model can produce output for **even one** station/variable, it returns `ModelSuccess` with per-entry `FAILURE` / `PARTIAL` status; `ModelFailure` is reserved for **total** inability to produce anything.
 
-`ModelFailure` carries `cause: FailureCause` (`INPUT_DATA` / `RESOURCE` / `MODEL_ERROR` / `CONFIGURATION` / `DEPENDENCY`) and a human-readable `message`. Per-station `FAILURE` entries currently carry only `status` + `flags` (e.g. `DATA_AVAILABILITY`); attaching a per-station `FailureCause` is a **possible future enhancement**, deferred to keep the per-entry surface light.
+`ModelFailure` carries `cause: FailureCause` (`INPUT_DATA` / `RESOURCE` / `MODEL_ERROR` / `CONFIGURATION` / `DEPENDENCY` / `GRID_MISMATCH`) and a human-readable `message`. Per-station `FAILURE` entries currently carry only `status` + `flags` (e.g. `DATA_AVAILABILITY`); attaching a per-station `FailureCause` is a **possible future enhancement**, deferred to keep the per-entry surface light.
 
 ---
 
@@ -132,7 +132,7 @@ Failure is represented at **two levels**, with a strict rule for which to use:
 
 - A **single-station** model returns a one-key dict (`{station_id: {variable_name: VariableOutput}}`).
 - A **group / national** model returns one entry per station it forecasts.
-- **Missing stations are explicit `FAILURE` entries**, never absent keys. A caller can always look up every expected station; the absence of usable data is represented by a `VariableOutput` with `status == FAILURE`, not by a missing key.
+- **Missing stations are explicit `FAILURE` entries**, never absent keys. A caller can always look up every expected station; the absence of usable data is represented by a `VariableOutput` with `status == FAILURE`, not by a missing key. FI code does not check this: it is an **orchestrator duty** (and, once landed, checked by the conformance checker proposed in decision 1.19 / issue #16).
 
 ### DataFrame Column Schema
 
