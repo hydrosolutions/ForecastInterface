@@ -885,8 +885,16 @@ class TestSpatialInputSpecAnchor:
 class TestTargetSpecAggregation:
     def test_defaults_unknown(self) -> None:
         t = _tgt(Unit.M3_PER_S)
-        assert t.aggregation is None
+        assert t.aggregation is Unknown.UNKNOWN
         assert t.label is PeriodLabel.UNKNOWN
+
+    @pytest.mark.parametrize("method", list(AggregationMethod))
+    def test_explicit_method_accepted(self, method: AggregationMethod) -> None:
+        assert _tgt(Unit.MM, aggregation=method).aggregation is method
+
+    def test_none_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="aggregation"):
+            _tgt(Unit.M3_PER_S, aggregation=None)
 
     def test_label_with_point_rejected(self) -> None:
         with pytest.raises(ValidationError, match="POINT"):

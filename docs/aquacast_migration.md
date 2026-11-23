@@ -188,7 +188,7 @@ requirement = InputRequirement(
 Notes:
 
 - `AggregationMethod` gains `MIN` and `POINT` (`MAX` was added earlier). `POINT` is an instantaneous value sampled at the stamp, so a label is meaningless and FI rejects one; a `POINT` variable never inherits the branch label.
-- `TargetSpec.aggregation` is optional. A `SUM` target with a rate unit (m³/s, mm/day, ...) is rejected. `MEAN` with `mm` or `m` stays legal (snow water equivalent, water level).
+- `TargetSpec.aggregation` defaults to explicit `Unknown.UNKNOWN` (never `None`; `None` is rejected, since targets have no per-parameter convention). A `SUM` target with a rate unit (m³/s, mm/day, ...) is rejected. `MEAN` with `mm` or `m` stays legal (snow water equivalent, water level).
 - `anchor.origin` must satisfy `0 <= origin < step`, and the step must divide 24 h once an origin is declared.
 
 ### 3.3 Echo the declaration in the output metadata
