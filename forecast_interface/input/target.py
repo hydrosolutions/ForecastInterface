@@ -2,7 +2,7 @@ from enum import Enum
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from forecast_interface.common import AggregationMethod, PeriodLabel, Unit
+from forecast_interface.common import AggregationMethod, PeriodLabel, Unit, Unknown
 
 
 class OutputRepresentation(Enum):
@@ -14,7 +14,7 @@ class OutputRepresentation(Enum):
 class TargetSpec(BaseModel):
     unit: Unit
     representations: frozenset[OutputRepresentation]
-    aggregation: AggregationMethod | None = None
+    aggregation: AggregationMethod | Unknown = Unknown.UNKNOWN
     label: PeriodLabel = PeriodLabel.UNKNOWN
 
     @model_validator(mode="after")

@@ -22,13 +22,13 @@ A model must declare what it forecasts. `targets` is a dict keyed by variable na
 class TargetSpec(BaseModel):
     unit: Unit
     representations: frozenset[OutputRepresentation]
-    aggregation: AggregationMethod | None = None
+    aggregation: AggregationMethod | Unknown = Unknown.UNKNOWN
     label: PeriodLabel = PeriodLabel.UNKNOWN
 ```
 
 - **unit** — the physical unit of the target (e.g. `Unit.M3_PER_S`).
 - **representations** — the output forms the model can produce for this target, a non-empty set of `OutputRepresentation`: `deterministic`, `quantiles`, `trajectories`. A target may support more than one form.
-- **aggregation** — optional: how the target value relates to its time step (`SUM`, `MEAN`, `MAX`, `MIN`, `POINT`). See [Time grid](#time-grid).
+- **aggregation** — how the target value relates to its time step (`SUM`, `MEAN`, `MAX`, `MIN`, `POINT`). Defaults to an explicit `Unknown.UNKNOWN`, never `None`, consistent with `VariableMetadata.aggregation`; `None` is rejected. Unlike input variables, where `None` means "per-parameter convention", a target has no such convention to fall back on, so an undeclared aggregation is `Unknown`. See [Time grid](#time-grid).
 - **label** — optional `PeriodLabel` for the target stamps; defaults to `UNKNOWN`. Rejected with `POINT`.
 
 `SUM` combined with a **rate** unit (`M3_PER_S`, `MM_PER_DAY`, `MM_PER_HOUR`, `MM_PER_S`, `M_PER_S`, `W_PER_M2`) is rejected on targets: summing a rate does not yield that rate. `MEAN` with an accumulation-like unit (`MM`, `M`) is allowed, because states such as SWE or water level legitimately use those units. The check applies to targets only; input variables are unchanged.
@@ -177,7 +177,7 @@ A time step alone does not say *which* instants the stamps fall on, nor what a s
   - `END` — stamp `t` names the period `[t-step, t)`.
   - `UNKNOWN` — not declared; never treated as either.
 
-Origin alone cannot tell `START` from `END`: the same physical day can be stamped 18:00Z on its start or on its end, both 18:00 mod 24h. Hence the label.
+Origin alone cannot tell `START` from `END`: the same physical day can be stamped 18:00Z on its start or on its end, both 18:00 mod 24h. Hence the label. The `origin` itself is label-independent: it is the position of the interval boundaries on the clock, so switching `START` to `END` keeps the same `origin` and only changes which endpoint stamps the period.
 
 The physical period is the same half-open interval `[a, b)` (left-closed, right-open, `b = a + step`) under either label; the label only says which endpoint stamps it: `START` stamps `a`, `END` stamps `b`. Changing the label never moves a boundary observation between periods. Example: the Nepal day Wednesday 18 Nov is `[2026-11-17T18:00Z, 2026-11-18T18:00Z)`; `START` stamps it `2026-11-17T18:00Z`, `END` stamps it `2026-11-18T18:00Z`. An observation exactly at 18:00Z on the 17th belongs to that day under both labels, and one exactly at 18:00Z on the 18th belongs to the next day under both labels.
 
