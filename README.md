@@ -10,6 +10,7 @@ uv add forecastinterface
 
 - [Model Interface Specification](docs/model_interface.md) — the `ForecastModel` protocol, training/lifecycle, and `ModelOutput` types
 - [Input Requirement Specification](docs/input_requirement.md) — the `InputRequirement` declaration and the `ModelInputs` bundle
+- [aquacast migration note](docs/aquacast_migration.md) — required and optional changes for adopting the temporal contract and training time grid PRs
 
 ## ModelOutput
 

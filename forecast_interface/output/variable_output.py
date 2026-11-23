@@ -1,3 +1,5 @@
+import datetime
+
 import polars as pl
 from pydantic import (
     BaseModel,
@@ -6,6 +8,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from forecast_interface.common.temporal import validate_on_grid
 
 from ._validators import (
     validate_cadence,
@@ -178,4 +182,14 @@ class VariableOutput(BaseModel):
         # Covers epistemic_uncertainty too: it carries the same temporal columns.
         for _, df in self._frames():
             validate_cadence(df, self.metadata.timedelta)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_phase(self) -> "VariableOutput":
+        origin = self.metadata.origin
+        if isinstance(origin, datetime.timedelta):
+            for _, df in self._frames():
+                validate_on_grid(
+                    df["datetime"], self.metadata.timedelta, origin, "datetime"
+                )
         return self

@@ -3,7 +3,10 @@ import datetime
 import polars as pl
 from polars.exceptions import InvalidOperationError
 
-from forecast_interface.common.temporal import validate_utc_datetime_dtype
+from forecast_interface.common.temporal import (
+    exact_nanoseconds,
+    validate_utc_datetime_dtype,
+)
 
 
 NUMERIC_DTYPES = (
@@ -29,11 +32,6 @@ def validate_temporal_columns(df: pl.DataFrame) -> None:
         validate_utc_datetime_dtype(col, df.schema[col])
         if df[col].is_null().any():
             raise ValueError(f"'{col}' values must not be null")
-
-
-def _exact_nanoseconds(td: datetime.timedelta) -> int:
-    # timedelta resolves to microseconds; avoid total_seconds() (float, lossy).
-    return ((td.days * 86_400 + td.seconds) * 10**6 + td.microseconds) * 1000
 
 
 _MAX_NS = 2**63 - 1
@@ -65,7 +63,7 @@ def _raise_gap_out_of_range(df: pl.DataFrame, exc: InvalidOperationError) -> Non
 def validate_cadence(df: pl.DataFrame, timedelta: datetime.timedelta) -> None:
     # Compare in nanoseconds: casting the gap up is lossless, whereas comparing
     # against the Python timedelta lets polars truncate it to the column's unit.
-    declared_ns = _exact_nanoseconds(timedelta)
+    declared_ns = exact_nanoseconds(timedelta)
     if abs(declared_ns) > _MAX_NS:
         raise ValueError(
             f"cadence out of representable range: declared timedelta {timedelta} "

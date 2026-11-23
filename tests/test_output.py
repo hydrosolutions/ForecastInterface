@@ -5,7 +5,7 @@ from typing import Literal
 import polars as pl
 import pytest
 
-from forecast_interface.common import AggregationMethod
+from forecast_interface.common import AggregationMethod, PeriodLabel, Unknown
 from forecast_interface.output import (
     DeterministicData,
     EpistemicUncertaintyData,
@@ -92,7 +92,7 @@ class TestAggregationMethod:
         assert AggregationMethod.MAX.value == "max"
 
     def test_member_count(self) -> None:
-        assert len(AggregationMethod) == 3
+        assert len(AggregationMethod) == 5
 
 
 class TestVariableStatus:
@@ -1259,6 +1259,135 @@ class TestCadenceOutOfRepresentableRange:
             )
 
 
+_DAILY_18 = timedelta(hours=18)
+
+
+def _daily_df_at_18(issues: list[datetime.datetime]) -> pl.DataFrame:
+    days = [
+        datetime.datetime(2024, 1, 1, 18, tzinfo=_UTC) + timedelta(days=i)
+        for i in range(2)
+    ]
+    return pl.DataFrame(
+        {
+            "issue_datetime": [i for i in issues for _ in days],
+            "datetime": days * len(issues),
+            "value": [1.0] * (len(days) * len(issues)),
+        }
+    )
+
+
+class TestVariableMetadataGrid:
+    def test_defaults_to_unknown(self) -> None:
+        meta = _make_metadata()
+        assert meta.origin is Unknown.UNKNOWN
+        assert meta.label is PeriodLabel.UNKNOWN
+
+    def test_echoes_origin_and_label(self) -> None:
+        meta = _make_metadata(origin=_DAILY_18, label=PeriodLabel.END)
+        assert meta.origin == _DAILY_18
+        assert meta.label is PeriodLabel.END
+
+    @pytest.mark.parametrize(
+        "origin", [timedelta(hours=-1), timedelta(days=1), timedelta(days=2)]
+    )
+    def test_rejects_origin_outside_range(self, origin: timedelta) -> None:
+        with pytest.raises(ValueError, match="origin"):
+            _make_metadata(origin=origin)
+
+    def test_rejects_origin_with_step_not_dividing_day(self) -> None:
+        with pytest.raises(ValueError, match="divide 24 hours"):
+            _make_metadata(timedelta=timedelta(hours=7), origin=timedelta(hours=1))
+
+    def test_unknown_origin_allows_step_not_dividing_day(self) -> None:
+        assert _make_metadata(timedelta=timedelta(hours=7)).origin is Unknown.UNKNOWN
+
+    def test_rejects_origin_not_whole_minutes(self) -> None:
+        with pytest.raises(ValueError, match="whole number of minutes"):
+            _make_metadata(origin=timedelta(seconds=30))
+
+
+class TestVariableOutputPhase:
+    def test_accepts_on_grid_daily_output(self) -> None:
+        vo = VariableOutput(
+            metadata=_make_metadata(origin=_DAILY_18),
+            deterministic=DeterministicData(data=_daily_df_at_18([_ISSUE_DT])),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.metadata.origin == _DAILY_18
+
+    def test_rejects_off_grid_naming_value(self) -> None:
+        with pytest.raises(ValueError, match="2024-01-01 00:00:00"):
+            VariableOutput(
+                metadata=_make_metadata(origin=_DAILY_18),
+                deterministic=_make_deterministic(),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_unknown_origin_accepts_any_phase(self) -> None:
+        vo = VariableOutput(
+            metadata=_make_metadata(),
+            deterministic=DeterministicData(data=_daily_df_at_18([_ISSUE_DT])),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.metadata.origin is Unknown.UNKNOWN
+
+    def test_accepts_multi_issue_batch_frames(self) -> None:
+        issues = [
+            _ISSUE_DT,
+            _ISSUE_DT + timedelta(days=1),
+            _ISSUE_DT + timedelta(days=2),
+        ]
+        vo = VariableOutput(
+            metadata=_make_metadata(origin=_DAILY_18),
+            deterministic=DeterministicData(data=_daily_df_at_18(issues)),
+            status=VariableStatus.SUCCESS,
+        )
+        assert vo.deterministic is not None
+        assert vo.deterministic.data.height == 6
+
+    def test_rejects_off_grid_in_later_issue_of_batch(self) -> None:
+        df = _daily_df_at_18([_ISSUE_DT, _ISSUE_DT + timedelta(days=1)])
+        df = df.with_columns(
+            pl.when(pl.int_range(pl.len()) >= 2)
+            .then(pl.col("datetime") + pl.duration(minutes=15))
+            .otherwise(pl.col("datetime"))
+            .alias("datetime")
+        )
+        with pytest.raises(ValueError, match="off the declared grid"):
+            VariableOutput(
+                metadata=_make_metadata(origin=_DAILY_18),
+                deterministic=DeterministicData(data=df),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_covers_epistemic_uncertainty_frame(self) -> None:
+        # Deterministic is on grid; only the epistemic frame is off grid.
+        with pytest.raises(ValueError, match="off the declared grid"):
+            VariableOutput(
+                metadata=_make_metadata(origin=_DAILY_18),
+                deterministic=DeterministicData(data=_daily_df_at_18([_ISSUE_DT])),
+                epistemic_uncertainty=EpistemicUncertaintyData(
+                    data=_make_epistemic_df()
+                ),
+                status=VariableStatus.SUCCESS,
+            )
+
+    def test_model_output_payload_without_new_fields_still_works(self) -> None:
+        vo = VariableOutput.model_validate(
+            {
+                "metadata": {
+                    "unit": Unit.M3_PER_S,
+                    "timedelta": timedelta(days=1),
+                    "forecast_horizon": 2,
+                    "offset": 0,
+                },
+                "deterministic": _make_deterministic(),
+                "status": VariableStatus.SUCCESS,
+            }
+        )
+        assert vo.metadata.origin is Unknown.UNKNOWN
+
+
 class TestCadenceErrorLocation:
     def test_data_gap_beyond_nanosecond_range_blames_the_data(self) -> None:
         df = pl.DataFrame(
@@ -1320,3 +1449,39 @@ class TestUtcDtypeAliasMessage:
 
         with pytest.raises(ValueError, match="only the literal 'UTC'"):
             validate_utc_datetime_dtype("datetime", pl.Datetime("us", "Etc/UTC"))
+
+
+class TestVariableMetadataAggregation:
+    def test_defaults_to_unknown(self) -> None:
+        assert _make_metadata().aggregation is Unknown.UNKNOWN
+
+    @pytest.mark.parametrize("method", list(AggregationMethod))
+    def test_each_method_accepted(self, method: AggregationMethod) -> None:
+        assert _make_metadata(aggregation=method).aggregation is method
+
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_point_with_label_rejected(self, label: PeriodLabel) -> None:
+        with pytest.raises(ValueError, match="POINT"):
+            _make_metadata(aggregation=AggregationMethod.POINT, label=label)
+
+    def test_point_with_unknown_label_accepted(self) -> None:
+        meta = _make_metadata(
+            aggregation=AggregationMethod.POINT, label=PeriodLabel.UNKNOWN
+        )
+        assert meta.aggregation is AggregationMethod.POINT
+
+    @pytest.mark.parametrize("label", [PeriodLabel.START, PeriodLabel.END])
+    def test_windowed_aggregation_with_label_accepted(self, label: PeriodLabel) -> None:
+        meta = _make_metadata(aggregation=AggregationMethod.MEAN, label=label)
+        assert meta.label is label
+
+    def test_payload_without_field_validates(self) -> None:
+        meta = VariableMetadata.model_validate(
+            {
+                "unit": Unit.M3_PER_S,
+                "timedelta": timedelta(days=1),
+                "forecast_horizon": 1,
+                "offset": 0,
+            }
+        )
+        assert meta.aggregation is Unknown.UNKNOWN
