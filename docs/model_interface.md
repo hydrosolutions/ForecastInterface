@@ -79,6 +79,16 @@ An artifact is trained on stamps with a specific grid (step, origin, label; see 
 - **`VariableMetadata.origin` / `label` / `aggregation`** (default unknown) echo the grid of an output so a `ModelOutput` is self-describing. `aggregation` echoes the target's declared `AggregationMethod` (explicit `Unknown.UNKNOWN` default, never `None`); the orchestrator checks it agrees with the target declaration. `POINT` with a label other than `UNKNOWN` is rejected, as on `TargetSpec`. Each period is the same half-open `[a, b)` under either label (`START` stamps `a`, `END` stamps `b`; see `docs/input_requirement.md`, *Time grid*). When `origin` is declared, every `datetime` in every frame must satisfy `(datetime - UTC midnight) mod timedelta == origin`; the error names the offending value. Unknown origin: no check.
 - **Issue time is deliberately not part of the declaration.** It is a property of the run, not of the training grid.
 
+### Provenance (optional)
+
+A trained artifact MAY carry a versioned provenance record (FI issue #16, decision 1.19), either via a `provenance` property (`ProvenanceDeclaringArtifact`) or in a sidecar `ProvenanceManifest` bound to the artifact bytes by SHA-256 (`bind_manifest` / `verify_manifest`; integrity only, no signing). A model supplying none of it is conformant; only a deployment profile may require it.
+
+- Every unknown-able field is `T | UnknownProvenance(reason)` with reason `NOT_SUPPLIED`, `UNRECOVERABLE`, `NOT_APPLICABLE` or `UNSUPPORTED_VERSION`; never `None`, never guessed, never taken from file mtimes or another timestamp. A root stage's `parent` is `UnknownProvenance(NOT_APPLICABLE)`.
+- Exposure is a list of per-stage windows (component, role, station or region scope, UTC start/end). Early-stopping and validation windows and preprocessing-fit windows count as exposure.
+- Checkpoint creation <= training completion <= export is enforced where both are known. All datetimes are tz-aware UTC.
+- `artifact_provenance(artifact)` never raises: a legacy artifact or failing getter reads `UnknownProvenance(NOT_SUPPLIED)`; an unrecognised `schema_version` reads `UNSUPPORTED_VERSION`.
+- `provenance_status(...)` returns `COMPLETE` / `PARTIAL` / `ABSENT`. `COMPLETE` needs every stage to have a known `training_completed_at`, a `WEIGHTS`/`TRAIN` exposure, and exposures for each preprocessing component listed or declared in `preprocessing_fitted` (unknown `preprocessing_fitted` gives `PARTIAL`). No status asserts independent evaluation.
+
 ### Warm-up and state (state-free in v0)
 
 FI's protocol is **state-free in v0**: `predict` / `hindcast` take no `state` parameter and return no state. This is a deliberate, lightweight default. It rests on separating two things commonly conflated as "warm-up":

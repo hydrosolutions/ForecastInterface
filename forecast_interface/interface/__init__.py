@@ -2,11 +2,57 @@ from .artifact import GridDeclaringArtifact, TrainedArtifact, artifact_training_
 from .failure import FailureCause
 from .grid_failure import grid_mismatch_failure
 from .protocol import BatchHindcastModel, ForecastModel, RetrainableModel
+from .provenance import (
+    ArtifactRef,
+    ConfigIdentity,
+    Exposure,
+    ExposureComponent,
+    ExposureRole,
+    ExposureScope,
+    ManifestDigestError,
+    ProvenanceDeclaringArtifact,
+    ProvenanceManifest,
+    ProvenanceRecord,
+    ProvenanceStatus,
+    StageKind,
+    TrainingStage,
+    UnknownProvenance,
+    UnknownReason,
+    artifact_provenance,
+    bind_manifest,
+    manifest_from_json,
+    manifest_to_json,
+    parse_provenance,
+    provenance_status,
+    verify_manifest,
+)
 from .result import ModelFailure, ModelResult, ModelSuccess
 from .run_config import RunConfig
 from .scope import ArtifactScope
 
 __all__ = [
+    "ArtifactRef",
+    "ConfigIdentity",
+    "Exposure",
+    "ExposureComponent",
+    "ExposureRole",
+    "ExposureScope",
+    "ManifestDigestError",
+    "ProvenanceDeclaringArtifact",
+    "ProvenanceManifest",
+    "ProvenanceRecord",
+    "ProvenanceStatus",
+    "StageKind",
+    "TrainingStage",
+    "UnknownProvenance",
+    "UnknownReason",
+    "artifact_provenance",
+    "bind_manifest",
+    "manifest_from_json",
+    "manifest_to_json",
+    "parse_provenance",
+    "provenance_status",
+    "verify_manifest",
     "ArtifactScope",
     "BatchHindcastModel",
     "FailureCause",
