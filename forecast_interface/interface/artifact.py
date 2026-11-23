@@ -20,8 +20,9 @@ class TrainedArtifact(Protocol):
 
     Rich provenance metadata (scope, region, training period, hashes, seed,
     product versions) and the group-artifact embedding-key / station-set-mismatch
-    contract are deferred to a LATER phase (Phase 4); see
-    ``docs/nepal-model-requirements.md`` §4 and §8.
+    contract are deferred and not yet typed or enforced; an optional versioned
+    provenance record is proposed in FI issue #16 (decision 1.19 in
+    ``docs/open_design_questions.md``).
 
     This is a marker Protocol (no members) used as a semantic boundary type.
     """
