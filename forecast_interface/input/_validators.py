@@ -20,6 +20,19 @@ NUMERIC_DTYPES = (
 )
 
 
+AVAILABLE_AT_COLUMN = "available_at_us"
+INTEGER_DTYPES = (
+    pl.Int8,
+    pl.Int16,
+    pl.Int32,
+    pl.Int64,
+    pl.UInt8,
+    pl.UInt16,
+    pl.UInt32,
+    pl.UInt64,
+)
+
+
 def validate_input_series_dataframe(df: pl.DataFrame) -> None:
     if "datetime" not in df.columns:
         raise ValueError("DataFrame must contain a 'datetime' column")
@@ -33,7 +46,16 @@ def validate_input_series_dataframe(df: pl.DataFrame) -> None:
     if df.height == 0:
         raise ValueError("InputSeries data must contain at least one row")
 
-    value_columns = [col for col in df.columns if col != "datetime"]
+    if AVAILABLE_AT_COLUMN in df.columns and not isinstance(
+        df.schema[AVAILABLE_AT_COLUMN], INTEGER_DTYPES
+    ):
+        raise ValueError(
+            f"Column '{AVAILABLE_AT_COLUMN}' must be an integer (UTC epoch microseconds)"
+        )
+
+    value_columns = [
+        col for col in df.columns if col not in ("datetime", AVAILABLE_AT_COLUMN)
+    ]
     if not value_columns:
         raise ValueError("InputSeries data must contain at least one value column")
     for col in value_columns:
