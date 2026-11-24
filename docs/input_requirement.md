@@ -193,6 +193,14 @@ Everything is additive: absent declarations read as unknown and behave as before
 
 ---
 
+## Observation availability (`available_at_us`)
+
+An `InputSeries` frame may carry one reserved column, `available_at_us`: integer UTC epoch microseconds at which each row's value became available to the caller. It matches what aquacast reads today. It is not a value column: FI does not count it as one, and unit conversion, aggregation and `max_nan` accounting must skip it. Null means "not known to be available". A frame with only `datetime` and `available_at_us` is still rejected (no value column).
+
+Absence means availability is unknown. A caller that assumes values were available at period close states that assumption by writing close plus lag into the column; FI never fills it in. Whether a model accepts unknown availability for training is the model's own policy; FI does not refuse it. Issue #22 tracks a typed policy for later.
+
+---
+
 ## Datetimes
 
 The `datetime` column of every `InputSeries` must be a `pl.Datetime` with `time_zone="UTC"`; tz-naive or non-UTC columns are **rejected** (decision 1.17). Convert once at the boundary with `.dt.convert_time_zone("UTC")`.
